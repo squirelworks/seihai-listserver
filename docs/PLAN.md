@@ -71,7 +71,7 @@ client port, `secure_login_key` and `require_secure_login` settings, tests in
 
 Next:
 
-- [ ] Switch the `seihai-core` dependency from the PR rev to `v0.0.5` once tagged.
+- [x] `seihai-core` is on tag `v0.0.5`.
 - [ ] The RC list (id 5) through the same handshake, once `seihai-rc` uses it.
 - [x] The gserver link (`VERIACC2`, 17) is encrypted (2026-10-31).
 - [ ] A `key-fingerprint` command that prints the key without starting.
