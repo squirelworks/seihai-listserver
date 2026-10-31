@@ -1,10 +1,12 @@
 # seihai-listserver settings. Every key is optional; these are the defaults.
 # Run with: seihai-listserver --config seihai-listserver.toml
 
-# Address to listen on. Keep 127.0.0.1 for a lab on one machine.
+# Address to listen on. 127.0.0.1: only this machine (a lab).
+# "0.0.0.0": every interface, to host for other machines (see the README,
+# "Hosting for other machines").
 bind = "127.0.0.1"
 
-# Port gservers register on.
+# Port gservers register on. When hosting, open it only to your gservers.
 gserver_port = 14900
 
 # Ports clients ask for the list on. Every port answers every login shape
