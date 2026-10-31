@@ -54,6 +54,9 @@ pub struct Config {
     /// Refuse an account and password sent in the clear (classic id 1).
     /// Off by default, so real clients keep working.
     pub require_secure_login: bool,
+    /// Refuse gserver links that are not encrypted (GServer-v2 and the
+    /// fork speak only the plain link). Off by default.
+    pub require_secure_gserver_link: bool,
 }
 
 impl Default for Config {
@@ -74,6 +77,7 @@ impl Default for Config {
             gserver_timeout_secs: 300,
             secure_login_key: PathBuf::from("seihai-login.key"),
             require_secure_login: false,
+            require_secure_gserver_link: false,
         }
     }
 }
@@ -155,6 +159,7 @@ mod tests {
         assert_eq!(s.max_connections, d.max_connections);
         assert_eq!(s.secure_login_key, d.secure_login_key);
         assert_eq!(s.require_secure_login, d.require_secure_login);
+        assert_eq!(s.require_secure_gserver_link, d.require_secure_gserver_link);
     }
 
     #[test]

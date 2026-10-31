@@ -52,3 +52,9 @@ secure_login_key = "seihai-login.key"
 # Refuse accounts and passwords sent in the clear (classic logins). Real
 # Graal clients cannot log in when this is on.
 require_secure_login = false
+
+# Seihai gservers encrypt their link to the listserver (it carries every
+# player's password when the gserver checks an account), with the same key
+# as above. Refuse plain links: GServer-v2 and the GPL fork cannot register
+# when this is on.
+require_secure_gserver_link = false

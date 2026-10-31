@@ -9,9 +9,9 @@ publish = false
 
 [dependencies]
 # Protocol, framing, version profiles and scripting shared with the Seihai client.
-# TODO(tag): rev of squirelworks/seihai PR "secure-login-sei00001" (SEI00001).
-# Once that PR is merged and tagged (v0.0.4), switch back to `tag = "v0.0.4"`.
-seihai-core = { git = "https://github.com/squirelworks/seihai", rev = "fe25c9fc8372773770fb3fbe22fc0326597ee9eb", default-features = false }
+# TODO(tag): rev of squirelworks/seihai PR "secure-gserver-link" (encrypted link).
+# Once that PR is merged and tagged (v0.0.5), switch to `tag = "v0.0.5"`.
+seihai-core = { git = "https://github.com/squirelworks/seihai", rev = "cda3e28562e01fb14265c609fa724230da03c1f1", default-features = false }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 argon2 = { version = "0.5", features = ["std"] }

@@ -109,7 +109,18 @@ ChaCha20-Poly1305). The spec is Seihai's
 - `secure_login_key = ""` turns secure logins off.
 - `require_secure_login = true` refuses classic account logins (real
   Graal clients then cannot get the list).
-- Classic logins work exactly as before.
+- Classic logins work exactly as before. The secure login is for Seihai
+  only: real Graal clients cannot be changed, so their logins stay in the
+  clear.
+
+### Encrypted gserver link
+
+seihai-gserver encrypts its link to the listserver (same handshake, inner
+token `SVLINK01`, then ChaCha20-Poly1305 records), so the account checks
+it sends (`VERIACC2`, with the player's password) are protected for every
+player, real clients included. It uses the same key as above. Plain links
+(GServer-v2, the GPL fork) are still taken unless
+`require_secure_gserver_link = true`.
 
 ```
 seihai-mae --online 127.0.0.1:14922 --list-only --version 2.31 --secure-login \
