@@ -109,6 +109,8 @@ pub fn serve(stream: TcpStream, id: u64, port: u16, shared: &Shared) {
     }
 }
 
+// TODO(docs/NEXT.md item 3): send the shape A reply to a link that stays
+// silent (real 1.41 rev 1 waits for the listserver to speak first).
 fn run(stream: TcpStream, id: u64, shared: &Shared) -> io::Result<()> {
     stream.set_read_timeout(Some(shared.config.client_timeout()))?;
     let mut writer = stream.try_clone()?;

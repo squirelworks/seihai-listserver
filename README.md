@@ -13,7 +13,9 @@ client: [seihai](https://github.com/squirelworks/seihai).
 **Status: first working version.** A Rust port of the lab listserver v2
 (`docs/reference/listserver.py`), checked on loopback with its shape tests and
 with Seihai's own list client. The plan is in [docs/PLAN.md](docs/PLAN.md), the
-rules every contributor and coding agent follows are in [AGENTS.md](AGENTS.md).
+rules every contributor and coding agent follows are in [AGENTS.md](AGENTS.md),
+the code layout is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the ordered
+to-do list is in [docs/NEXT.md](docs/NEXT.md).
 
 ## Run
 
