@@ -38,5 +38,5 @@ where the code goes.
   clear (Squirrel, 2026-10-31).
 - Done (2026-10-31): the encrypted gserver link, so `VERIACC2` is no longer
   in the clear between Seihai's gserver and this listserver.
-- Switch `seihai-core` from the PR rev to `v0.0.5` once tagged.
+- Done: `seihai-core` is on tag `v0.0.5`.
 - A `key-fingerprint` command that prints the key without starting.
