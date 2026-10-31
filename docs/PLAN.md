@@ -62,3 +62,20 @@ Still to do for step 5: real clients under Wine, and the fork and the Rust
 gserver registering. Not in the Python version either, left for later: speaking first to a silent 1.41 (shape S),
 and a check on which gservers may register (any link to the gserver port can
 register today; keep `bind = "127.0.0.1"` until then).
+
+## Secure login (2026-10-31)
+
+Done: id 7 with `SEI00001` (Seihai `documentation/secure-login.md`) on every
+client port, `secure_login_key` and `require_secure_login` settings, tests in
+`tests/secure_login.rs` with Seihai's own client.
+
+Next:
+
+- [ ] Switch the `seihai-core` dependency from the PR rev back to a tag once
+      seihai's secure-login PR is merged and tagged (`v0.0.4`).
+- [ ] The RC list (id 5) through the same handshake, once `seihai-rc` uses it.
+- [ ] The gserver link (`VERIACC2`, 17) still carries players' passwords in
+      the clear between gserver and listserver; secure that link (same
+      handshake, the gserver pins the listserver key) or let the gserver
+      check accounts itself.
+- [ ] A `key-fingerprint` command that prints the key without starting.

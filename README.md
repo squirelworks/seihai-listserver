@@ -95,6 +95,27 @@ closes. Gservers: `REGISTERV3`, `NEWSERVER`, `SERVERHQPASS`, `SERVERHQLEVEL`,
 gserver's entry is dropped when its link closes or is silent for
 `gserver_timeout_secs`.
 
+## Secure login (SEI00001)
+
+Seihai clients started with `--secure-login` send the version token
+`SEI00001` and get the list without the account or password ever crossing
+the wire in the clear (X25519 key exchange, Ed25519-signed server hello,
+ChaCha20-Poly1305). The spec is Seihai's
+[`documentation/secure-login.md`](https://github.com/squirelworks/seihai/blob/main/documentation/secure-login.md).
+
+- On first start the listserver makes its key in `secure_login_key`
+  (default `seihai-login.key` beside the config) and logs its fingerprint.
+  Publish the fingerprint so players can check it; back the file up.
+- `secure_login_key = ""` turns secure logins off.
+- `require_secure_login = true` refuses classic account logins (real
+  Graal clients then cannot get the list).
+- Classic logins work exactly as before.
+
+```
+seihai-mae --online 127.0.0.1:14922 --list-only --version 2.31 --secure-login \
+  --account test1 --password-env GRAAL_PW
+```
+
 ## Build
 
 ```

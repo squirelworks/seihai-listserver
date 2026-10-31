@@ -3,6 +3,7 @@
 use crate::accounts::Accounts;
 use crate::config::Config;
 use crate::state::Servers;
+use seihai_core::protocol::seclogin::{self, ServerIdentity};
 use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -13,6 +14,8 @@ pub struct Shared {
     pub config: Config,
     pub accounts: Accounts,
     pub servers: Servers,
+    /// This listserver's secure-login key; `None` when secure logins are off.
+    pub identity: Option<ServerIdentity>,
     open: AtomicUsize,
     next_id: AtomicU64,
 }
@@ -30,6 +33,21 @@ pub struct Running {
 /// A port of 0 picks a free one (for tests).
 pub fn start(config: Config) -> Result<Running, String> {
     let accounts = Accounts::new(&config.accounts)?;
+    let identity = if config.secure_login_key.as_os_str().is_empty() {
+        log!("secure login (SEI00001): off");
+        None
+    } else {
+        let path = &config.secure_login_key;
+        let (id, created) = ServerIdentity::load_or_create(path)
+            .map_err(|e| format!("secure login key {}: {e}", path.display()))?;
+        log!(
+            "secure login (SEI00001): {} key {}, fingerprint {}",
+            if created { "made a new" } else { "loaded" },
+            seclogin::encode_key(&id.public_key()),
+            seclogin::fingerprint(&id.public_key())
+        );
+        Some(id)
+    };
     let bind = |port: u16| {
         TcpListener::bind((config.bind.as_str(), port))
             .map_err(|e| format!("cannot listen on {}:{port}: {e}", config.bind))
@@ -48,6 +66,7 @@ pub fn start(config: Config) -> Result<Running, String> {
         config,
         accounts,
         servers: Servers::default(),
+        identity,
         open: AtomicUsize::new(0),
         next_id: AtomicU64::new(1),
     });

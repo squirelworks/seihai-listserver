@@ -47,6 +47,13 @@ pub struct Config {
     /// Seconds a gserver link may stay silent before its entry is dropped.
     /// GServer-v2 beta4 sends a keep-alive every 60 s.
     pub gserver_timeout_secs: u64,
+    /// The Seihai secure login (`SEI00001`, Seihai's
+    /// `documentation/secure-login.md`): the file with this listserver's
+    /// Ed25519 key, created on first start. Empty: secure logins are refused.
+    pub secure_login_key: PathBuf,
+    /// Refuse an account and password sent in the clear (classic id 1).
+    /// Off by default, so real clients keep working.
+    pub require_secure_login: bool,
 }
 
 impl Default for Config {
@@ -65,18 +72,24 @@ impl Default for Config {
             max_connections: 256,
             client_timeout_secs: 30,
             gserver_timeout_secs: 300,
+            secure_login_key: PathBuf::from("seihai-login.key"),
+            require_secure_login: false,
         }
     }
 }
 
 impl Config {
-    /// Read a config file. A relative `accounts` or `log_file` path is taken
-    /// from the config file's folder.
+    /// Read a config file. A relative `accounts`, `log_file` or
+    /// `secure_login_key` path is taken from the config file's folder.
     pub fn load(path: &Path) -> Result<Self, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut cfg = Self::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let dir = path.parent().unwrap_or(Path::new(""));
-        for p in [&mut cfg.accounts, &mut cfg.log_file] {
+        for p in [
+            &mut cfg.accounts,
+            &mut cfg.log_file,
+            &mut cfg.secure_login_key,
+        ] {
             if !p.as_os_str().is_empty() && p.is_relative() {
                 *p = dir.join(&*p);
             }
@@ -140,6 +153,8 @@ mod tests {
         assert_eq!(s.accounts, d.accounts);
         assert_eq!(s.gserver_ip, d.gserver_ip);
         assert_eq!(s.max_connections, d.max_connections);
+        assert_eq!(s.secure_login_key, d.secure_login_key);
+        assert_eq!(s.require_secure_login, d.require_secure_login);
     }
 
     #[test]
