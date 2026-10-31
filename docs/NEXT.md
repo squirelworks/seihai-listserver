@@ -30,3 +30,13 @@ where the code goes.
 8. **First release** (`v0.1.0`): only after Squirrel or Chiaki says go. The
    release workflow already packs the binary, README, licences and the
    sample config for four targets.
+
+## Secure login follow-ups (2026-10-31)
+
+- Switch `seihai-core` from the PR rev to the tag once seihai's
+  secure-login PR is merged and tagged (`v0.0.4`).
+- The RC list (id 5) through the same handshake, once `seihai-rc` speaks it.
+- `VERIACC2` (gserver link) still carries players' passwords in the clear
+  between gserver and listserver: secure that link (same handshake, the
+  gserver pins the listserver's key) or keep account checks on the gserver.
+- A `key-fingerprint` command that prints the key without starting.
