@@ -36,7 +36,8 @@ where the code goes.
 - Switch `seihai-core` from the PR rev to the tag once seihai's
   secure-login PR is merged and tagged (`v0.0.4`).
 - The RC list (id 5) through the same handshake, once `seihai-rc` speaks it.
-- `VERIACC2` (gserver link) still carries players' passwords in the clear
-  between gserver and listserver: secure that link (same handshake, the
-  gserver pins the listserver's key) or keep account checks on the gserver.
+- Seihai only: real clients cannot be changed, so their logins stay in the
+  clear (Squirrel, 2026-10-31).
+- Optional, only if Squirrel asks: `VERIACC2` (gserver link, both ends ours)
+  carries players' passwords in the clear; the same handshake could cover it.
 - A `key-fingerprint` command that prints the key without starting.
