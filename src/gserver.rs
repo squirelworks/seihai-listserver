@@ -5,9 +5,16 @@
 //! zlib frames (`u16be` length + zlib body of lines). The listserver
 //! answers only `VERIACC2`, with `SVI_VERIACC2`. The entry is dropped when
 //! the link closes or stays silent past `gserver_timeout_secs`.
+//!
+//! A Seihai gserver may instead open with the encrypted link (Seihai's
+//! `documentation/secure-login.md`, "Gserver to listserver link"): C1 with
+//! the inner token `SVLINK01`, S1 back, then the same classic link inside
+//! ChaCha20-Poly1305 records, so players' passwords in `VERIACC2` never
+//! cross the wire in the clear.
 
 use crate::server::Shared;
 use crate::wire::{self, gchar, put_gstr, show, Fields};
+use seihai_core::protocol::seclogin::{self, ClientHello};
 use seihai_core::protocol::{write_zlib_frame, zlib_decompress};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -54,23 +61,95 @@ pub fn serve(stream: TcpStream, id: u64, shared: &Shared) {
     }
 }
 
-// TODO(docs/NEXT.md item 2): an allow-list of gserver addresses and HQ
-// passwords; today any link to the gserver port can register.
-fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared) -> io::Result<()> {
-    stream.set_read_timeout(Some(shared.config.gserver_timeout()))?;
-    let mut writer = stream.try_clone()?;
-    let mut reader = BufReader::new(stream);
+/// The link's two halves as one stream, so a [`seclogin::Channel`] can
+/// wrap it. Reads go through the buffered reader the first line was read
+/// with, so nothing it already holds is lost.
+struct Duplex {
+    reader: BufReader<TcpStream>,
+    writer: TcpStream,
+}
 
-    let mut reg = Vec::new();
-    (&mut reader)
-        .take(MAX_REGISTER)
-        .read_until(b'\n', &mut reg)?;
-    if !reg.ends_with(b"\n") {
+impl Read for Duplex {
+    fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
+        self.reader.read(b)
+    }
+}
+
+impl Write for Duplex {
+    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+        self.writer.write(b)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
+    }
+}
+
+/// Read one line (with its line feed) of at most [`MAX_REGISTER`] bytes.
+fn first_line<R: BufRead>(r: &mut R) -> io::Result<Vec<u8>> {
+    let mut line = Vec::new();
+    r.take(MAX_REGISTER).read_until(b'\n', &mut line)?;
+    if !line.ends_with(b"\n") || line.len() < 2 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "no REGISTERV3 line",
         ));
     }
+    Ok(line)
+}
+
+// TODO(docs/NEXT.md item 2): an allow-list of gserver addresses and HQ
+// passwords; today any link to the gserver port can register.
+fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared) -> io::Result<()> {
+    stream.set_read_timeout(Some(shared.config.gserver_timeout()))?;
+    let writer = stream.try_clone()?;
+    let mut link = Duplex {
+        reader: BufReader::new(stream),
+        writer,
+    };
+    let line = first_line(&mut link.reader)?;
+    if !line.starts_with(seclogin::TOKEN.as_bytes()) {
+        if shared.config.require_secure_gserver_link {
+            log!("gserver {id} plain link refused (require_secure_gserver_link)");
+            return Ok(());
+        }
+        return session(&mut BufReader::new(link), line, id, peer, shared);
+    }
+    // The encrypted link: C1 here, S1 back, then records both ways.
+    let Some(identity) = shared.identity.as_ref() else {
+        log!("gserver {id} encrypted link refused: secure_login_key is empty");
+        return Ok(());
+    };
+    let hello = match ClientHello::parse(&line, 0) {
+        Some(Ok(h)) if h.inner == *seclogin::LINK_TOKEN.as_bytes() => h,
+        _ => {
+            log!("gserver {id} bad encrypted-link hello: {}", show(&line));
+            return Ok(());
+        }
+    };
+    let (mut s1, opener) = hello
+        .respond(identity)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    s1.push(b'\n');
+    link.write_all(&s1)?;
+    link.flush()?;
+    log!(
+        "gserver {id} encrypted link (SEI00001 {})",
+        seclogin::LINK_TOKEN
+    );
+    let mut inner = BufReader::new(opener.into_channel().wrap(link));
+    let line = first_line(&mut inner)?;
+    session(&mut inner, line, id, peer, shared)
+}
+
+/// The classic link from its first line (`reg`, the `REGISTERV3` line) on,
+/// over `link`: plain, or inside the encrypted channel.
+fn session<S: Read + Write>(
+    link: &mut BufReader<S>,
+    reg: Vec<u8>,
+    id: u64,
+    peer: &str,
+    shared: &Shared,
+) -> io::Result<()> {
     let reg_id = reg[0].wrapping_sub(32) as usize;
     let reg = &reg[1..reg.len() - 1];
     if reg_id == svo::REGISTERV3 {
@@ -83,7 +162,7 @@ fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared) -> io::Result<()
     }
 
     loop {
-        let body = match wire::read_frame(&mut reader) {
+        let body = match wire::read_frame(link) {
             Ok(b) => b,
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
             Err(e) => return Err(e),
@@ -97,7 +176,9 @@ fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared) -> io::Result<()
         };
         for line in wire::lines(&raw) {
             if let Some(reply) = handle(line, id, peer, shared) {
-                writer.write_all(&write_zlib_frame(&reply)?)?;
+                let w = link.get_mut();
+                w.write_all(&write_zlib_frame(&reply)?)?;
+                w.flush()?;
             }
         }
     }

@@ -71,3 +71,12 @@ Spec: Seihai `documentation/secure-login.md`. The crypto is
 The key is loaded (or made) in `server::start` from `secure_login_key` and
 kept in `Shared::identity`. A seal that does not open closes the link with
 no answer.
+
+## Encrypted gserver link
+
+`gserver.rs` reads the first line; `SEI00001` there starts the encrypted
+link (C1 with inner `SVLINK01`, S1 back as a plain line), and the rest of
+the link is the classic one inside `seclogin::Channel` records
+(`Duplex` + `Channel::wrap`). `session` runs the same loop either way.
+`require_secure_gserver_link` refuses plain links. Tests:
+`tests/secure_gserver_link.rs`.

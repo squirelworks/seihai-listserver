@@ -71,11 +71,7 @@ client port, `secure_login_key` and `require_secure_login` settings, tests in
 
 Next:
 
-- [ ] Switch the `seihai-core` dependency from the PR rev back to a tag once
-      seihai's secure-login PR is merged and tagged (`v0.0.4`).
+- [ ] Switch the `seihai-core` dependency from the PR rev to `v0.0.5` once tagged.
 - [ ] The RC list (id 5) through the same handshake, once `seihai-rc` uses it.
-- [ ] The gserver link (`VERIACC2`, 17) still carries players' passwords in
-      the clear between gserver and listserver; secure that link (same
-      handshake, the gserver pins the listserver key) or let the gserver
-      check accounts itself.
+- [x] The gserver link (`VERIACC2`, 17) is encrypted (2026-10-31).
 - [ ] A `key-fingerprint` command that prints the key without starting.
