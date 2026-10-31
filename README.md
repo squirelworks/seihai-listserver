@@ -10,8 +10,58 @@ Part of the Seihai server stack:
 [seihai-gserver-v2](https://github.com/squirelworks/seihai-gserver-v2) (GPL fork of GServer-v2, ships first) ·
 client: [seihai](https://github.com/squirelworks/seihai).
 
-**Status: scaffold.** Nothing works yet. The plan is in [docs/PLAN.md](docs/PLAN.md),
-the rules every contributor and coding agent follows are in [AGENTS.md](AGENTS.md).
+**Status: first working version.** A Rust port of the lab listserver v2
+(`docs/reference/listserver.py`), checked on loopback with its shape tests and
+with Seihai's own list client. The plan is in [docs/PLAN.md](docs/PLAN.md), the
+rules every contributor and coding agent follows are in [AGENTS.md](AGENTS.md).
+
+## Run
+
+```
+seihai-listserver sample-config > seihai-listserver.toml   # optional, edit to taste
+seihai-listserver                                           # reads ./seihai-listserver.toml if present
+seihai-listserver --config path/to/listserver.toml
+```
+
+With no config it listens on `127.0.0.1`: gservers register on 14900 and
+clients ask for the list on 14921, 14922 and 14923 (every port answers every
+login shape). The site and upgrade URLs are empty unless you set them.
+
+Point a gserver's listserver setting at `127.0.0.1`, port 14900. Point a client
+at one of the client ports, for example
+`seihai --online 127.0.0.1:14922 --list-only --account test1 --password-env GRAAL_PW --version 2.22`.
+
+## Accounts
+
+Without an `accounts` file every account and password gets in (open mode).
+With one, only the accounts in it can fetch the list, and gservers that check
+accounts through the listserver (`VERIACC2`) get the same answer.
+
+```
+GRAAL_PW=labpw seihai-listserver add-account accounts.txt test1 --password-env GRAAL_PW
+```
+
+The file keeps an argon2id hash per account, never the password. It is read
+again when it changes, so accounts can be added while the listserver runs.
+Lines in the Python lab listserver's plain `account password` format are
+skipped with a warning; add those accounts again with `add-account`.
+
+## What it speaks
+
+| Client | Sends | Gets |
+|---|---|---|
+| 2.00, 2.05 (shape A) | id 0 list name | id 0 list, id 2 status (one zlib frame) |
+| 2.17 (shape B) | id 0 + id 1 account in one frame | the same, once |
+| 2.19 to 2.21 (gen 4) | id 4 key + token, then id 1 | id 0 + id 2 in one bz2, partly XORed frame |
+| 2.22, 2.31, 3.x (gen 5) | id 7 key + token + list name, then id 1 | two gen-5 zlib frames: id 0; id 2, id 3 site URL, id 5 upgrade URL |
+| RC (gen 5) | id 5 key + token, then id 1 | as gen 5 |
+
+gen 4 and gen 5 lists carry the HQ level tag (`U ` hidden, `H ` bronze, none
+for classic, `P ` gold, `3 ` G3D). A refused login gets id 4 and the link
+closes. Gservers: `REGISTERV3`, `NEWSERVER`, `SERVERHQPASS`, `SERVERHQLEVEL`,
+`SETPLYR`, `PLYRADD`, `PLYRREM`, `VERIACC2`, `SETIP`, `PING`, `SENDTEXT`. A
+gserver's entry is dropped when its link closes or is silent for
+`gserver_timeout_secs`.
 
 ## Build
 
@@ -19,6 +69,10 @@ the rules every contributor and coding agent follows are in [AGENTS.md](AGENTS.m
 cargo build --release
 cargo test
 ```
+
+`cargo test` starts the listserver on free loopback ports and runs the lab
+shape tests (`tests/shapes.rs`) and Seihai's list client for 2.05, 2.17,
+2.22, 2.31 and 3.04 (`tests/seihai_client.rs`).
 
 Releases for Linux, Windows and macOS are built by GitHub Actions on each `v*` tag.
 

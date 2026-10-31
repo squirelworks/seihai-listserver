@@ -45,3 +45,20 @@ Accounts: open by default; with an accounts file only listed accounts get in.
    server on an ephemeral loopback port.
 5. Lab check: Seihai `--list-only` for 2.00, 2.05, 2.17, 2.22, 2.31; real clients
    under Wine if available; the fork and the Rust gserver both register.
+
+## State (2026-10-31)
+
+Steps 1 to 4 are done. The config is `seihai-listserver.sample.toml`; the
+accounts are argon2id hashes made with `seihai-listserver add-account`.
+Checked on loopback in a container:
+
+- `cargo test`: the shape tests (`tests/shapes.rs`) and Seihai's list client
+  from seihai-core v0.0.3 for 2.05, 2.17, 2.22, 2.31 and 3.04
+  (`tests/seihai_client.rs`), right and wrong passwords.
+- `docs/reference/test_listserver.py` run unchanged against the Rust binary
+  (open mode, and with an accounts file and `--bad-login`): all checks pass.
+
+Still to do for step 5: real clients under Wine, and the fork and the Rust
+gserver registering. Not in the Python version either, left for later: speaking first to a silent 1.41 (shape S),
+and a check on which gservers may register (any link to the gserver port can
+register today; keep `bind = "127.0.0.1"` until then).

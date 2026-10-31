@@ -1,0 +1,39 @@
+# seihai-listserver settings. Every key is optional; these are the defaults.
+# Run with: seihai-listserver --config seihai-listserver.toml
+
+# Address to listen on. Keep 127.0.0.1 for a lab on one machine.
+bind = "127.0.0.1"
+
+# Port gservers register on.
+gserver_port = 14900
+
+# Ports clients ask for the list on. Every port answers every login shape
+# (2.00/2.05, 2.17, 2.19-2.21, 2.22/2.31, 3.x and the RC list).
+client_ports = [14921, 14922, 14923]
+
+# Name of the list, used in the status text.
+list_name = "Lab listserver"
+
+# Status text after a login. {list}, {account} and {servers} are filled in.
+status = "Welcome to {list}, {account}.\nThere are {servers} server(s) online."
+
+# Site and upgrade URLs sent to 2.22 and later. Empty unless you set them.
+site_url = ""
+upgrade_url = ""
+
+# Accounts file, made with `seihai-listserver add-account FILE ACCOUNT`.
+# Empty: open mode, every account and password gets in.
+# A relative path is taken from this file's folder.
+accounts = ""
+
+# Also write the log here. Empty: standard error only.
+log_file = ""
+
+# Address the list shows for each gserver: "peer" (where its link comes
+# from) or "sent" (what the gserver says; "peer" when it says AUTO).
+gserver_ip = "peer"
+
+# Most links open at once, and how long a silent link stays open (seconds).
+max_connections = 256
+client_timeout_secs = 30
+gserver_timeout_secs = 300
