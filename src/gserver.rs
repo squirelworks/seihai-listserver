@@ -54,6 +54,8 @@ pub fn serve(stream: TcpStream, id: u64, shared: &Shared) {
     }
 }
 
+// TODO(docs/NEXT.md item 2): an allow-list of gserver addresses and HQ
+// passwords; today any link to the gserver port can register.
 fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared) -> io::Result<()> {
     stream.set_read_timeout(Some(shared.config.gserver_timeout()))?;
     let mut writer = stream.try_clone()?;

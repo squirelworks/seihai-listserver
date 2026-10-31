@@ -13,7 +13,9 @@ client: [seihai](https://github.com/squirelworks/seihai).
 **Status: first working version.** A Rust port of the lab listserver v2
 (`docs/reference/listserver.py`), checked on loopback with its shape tests and
 with Seihai's own list client. The plan is in [docs/PLAN.md](docs/PLAN.md), the
-rules every contributor and coding agent follows are in [AGENTS.md](AGENTS.md).
+rules every contributor and coding agent follows are in [AGENTS.md](AGENTS.md),
+the code layout is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the ordered
+to-do list is in [docs/NEXT.md](docs/NEXT.md).
 
 ## Run
 
@@ -30,6 +32,36 @@ login shape). The site and upgrade URLs are empty unless you set them.
 Point a gserver's listserver setting at `127.0.0.1`, port 14900. Point a client
 at one of the client ports, for example
 `seihai --online 127.0.0.1:14922 --list-only --account test1 --password-env GRAAL_PW --version 2.22`.
+
+## Hosting for other machines
+
+By default the listserver only listens on `127.0.0.1`, so only programs on the
+same machine can reach it. To serve clients and gservers on other machines:
+
+1. Set `bind` in `seihai-listserver.toml` to `"0.0.0.0"` (every IPv4 interface)
+   or to one interface's address, such as `"<lan-or-public-ip>"`.
+2. Open the ports in the firewall and, behind a router, forward them to this
+   machine: the client ports (`client_ports`, 14921 to 14923 by default) for
+   players, and `gserver_port` (14900) only for the gservers you run.
+3. Set `gserver_ip`. With `"peer"` the list shows each gserver at the address
+   its link comes from. A gserver on the same machine then registers from
+   `127.0.0.1`, and players elsewhere cannot use that address. In that case set
+   `gserver_ip = "sent"` and set the gserver's own server IP to the address
+   players should use (`<public-host>`).
+4. Use an accounts file (see below) unless the list is meant to be open to
+   every account and password.
+
+```toml
+bind = "0.0.0.0"
+gserver_ip = "sent"
+accounts = "accounts.txt"
+```
+
+Any program that can reach `gserver_port` can register a server on the list
+and ask whether an account and password are valid (`VERIACC2`). Until the
+listserver can limit which gservers may register, keep that port closed to
+the outside: allow it only from your gservers' addresses in the firewall, or
+run the gservers on the same machine.
 
 ## Accounts
 
