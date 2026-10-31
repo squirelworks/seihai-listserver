@@ -13,16 +13,21 @@
 //!   is two zlib frames: id 0 list; then id 2 status, id 3 site URL and
 //!   id 5 upgrade URL.
 //!
+//! - id 7 with the token `SEI00001` (the Seihai secure login): the server
+//!   hello in a plain frame, then the sealed id 1 in a plain frame, then the
+//!   gen-5 reply as for id 7. See Seihai's `documentation/secure-login.md`.
+//!
 //! The list is tagged with the HQ level for gen 4 and gen 5 only. A refused
 //! login gets id 4 (the error text) and the link is closed.
 
 use crate::server::Shared;
 use crate::state::{plo, status_message};
 use crate::wire::{self, gchar, show, Fields};
+use seihai_core::protocol::seclogin::{self, ClientHello};
 use seihai_core::protocol::{
     bz2_compress, bz2_decompress, zlib_compress, zlib_decompress, Gen5, Gen5Comp,
 };
-use std::io::{self, BufReader, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::net::{Shutdown, TcpStream};
 
 /// Client to listserver ids.
@@ -139,37 +144,12 @@ fn run(stream: TcpStream, id: u64, shared: &Shared) -> io::Result<()> {
             let payload = &line[1..];
             match pid {
                 pli::SERVERLIST => {
-                    let mut f = Fields::new(payload);
-                    let (Some(account), Some(password)) = (f.gstr(), f.gstr()) else {
-                        log!("client {id} bad account message: {}", show(payload));
-                        continue;
-                    };
-                    log!("client {id} account {}", show(account));
-                    if let Some(err) = shared.accounts.check(account, password) {
-                        log!("client {id} refused {}: {}", show(account), show(err));
-                        let mut msg = vec![gchar(plo::ERROR)];
-                        msg.extend_from_slice(err);
-                        send(&mut writer, &mut coding, &[msg])?;
-                        let _ = writer.shutdown(Shutdown::Write);
-                        return Ok(());
+                    if shared.config.require_secure_login {
+                        log!("client {id} sent its account in the clear; refused (require_secure_login)");
+                        return refuse(&mut writer, &mut coding, NEED_SECURE);
                     }
-                    let list = shared.servers.list_message(coding.tagged());
-                    let status = status(shared, account);
-                    if let Coding::Gen5 { .. } = coding {
-                        send(&mut writer, &mut coding, &[list])?;
-                        let site = [
-                            vec![gchar(plo::SITEURL)],
-                            shared.config.site_url.as_bytes().to_vec(),
-                        ]
-                        .concat();
-                        let upgrade = [
-                            vec![gchar(plo::UPGURL)],
-                            shared.config.upgrade_url.as_bytes().to_vec(),
-                        ]
-                        .concat();
-                        send(&mut writer, &mut coding, &[status, site, upgrade])?;
-                    } else {
-                        send(&mut writer, &mut coding, &[list, status])?;
+                    if answer_account(&mut writer, &mut coding, id, shared, payload)? {
+                        return Ok(());
                     }
                 }
                 pli::V1VER => {
@@ -179,6 +159,12 @@ fn run(stream: TcpStream, id: u64, shared: &Shared) -> io::Result<()> {
                         let list = shared.servers.list_message(false);
                         send(&mut writer, &mut coding, &[list, status(shared, b"player")])?;
                     }
+                }
+                pli::V2ENCRYPTKEYCL if payload.get(1..9).is_some_and(seclogin::is_token) => {
+                    // The Seihai secure login: C1 here, S1 back, then C2
+                    // with id 1's payload sealed. Anything after C1 in its
+                    // frame is ignored.
+                    return secure_login(&mut reader, &mut writer, &mut coding, id, shared, line);
                 }
                 pli::V2VER | pli::V2SERVERLISTRC | pli::V2ENCRYPTKEYCL => {
                     let Some(&key) = payload.first() else {
@@ -204,6 +190,115 @@ fn run(stream: TcpStream, id: u64, shared: &Shared) -> io::Result<()> {
             }
         }
     }
+}
+
+/// Error text for a classic account login when `require_secure_login` is on.
+pub const NEED_SECURE: &[u8] = b"This listserver needs the Seihai secure login.";
+/// Error text for a secure login when it is turned off.
+pub const SECURE_OFF: &[u8] = b"Secure login is turned off on this listserver.";
+
+/// Answer id 1 (`payload`: account and password GSTRINGs). `true` when the
+/// login was refused and the link is to close.
+fn answer_account(
+    writer: &mut TcpStream,
+    coding: &mut Coding,
+    id: u64,
+    shared: &Shared,
+    payload: &[u8],
+) -> io::Result<bool> {
+    let mut f = Fields::new(payload);
+    let (Some(account), Some(password)) = (f.gstr(), f.gstr()) else {
+        log!("client {id} bad account message: {}", show(payload));
+        return Ok(false);
+    };
+    log!("client {id} account {}", show(account));
+    if let Some(err) = shared.accounts.check(account, password) {
+        log!("client {id} refused {}: {}", show(account), show(err));
+        refuse(writer, coding, err)?;
+        return Ok(true);
+    }
+    let list = shared.servers.list_message(coding.tagged());
+    let status = status(shared, account);
+    if let Coding::Gen5 { .. } = coding {
+        send(writer, coding, &[list])?;
+        let site = [
+            vec![gchar(plo::SITEURL)],
+            shared.config.site_url.as_bytes().to_vec(),
+        ]
+        .concat();
+        let upgrade = [
+            vec![gchar(plo::UPGURL)],
+            shared.config.upgrade_url.as_bytes().to_vec(),
+        ]
+        .concat();
+        send(writer, coding, &[status, site, upgrade])?;
+    } else {
+        send(writer, coding, &[list, status])?;
+    }
+    Ok(false)
+}
+
+/// Send id 4 with `err` and close the sending side.
+fn refuse(writer: &mut TcpStream, coding: &mut Coding, err: &[u8]) -> io::Result<()> {
+    let mut msg = vec![gchar(plo::ERROR)];
+    msg.extend_from_slice(err);
+    send(writer, coding, &[msg])?;
+    let _ = writer.shutdown(Shutdown::Write);
+    Ok(())
+}
+
+/// The Seihai secure login (`SEI00001`) from C1 (`line`, the whole id 7
+/// message) to the list reply. See Seihai's `documentation/secure-login.md`.
+fn secure_login<R: Read>(
+    reader: &mut R,
+    writer: &mut TcpStream,
+    coding: &mut Coding,
+    id: u64,
+    shared: &Shared,
+    line: &[u8],
+) -> io::Result<()> {
+    let Some(identity) = shared.identity.as_ref() else {
+        log!("client {id} secure login refused: secure_login_key is empty");
+        return refuse(writer, coding, SECURE_OFF);
+    };
+    let bad = |what: String| {
+        log!("client {id} secure login failed: {what}");
+        Ok(())
+    };
+    let hello = match ClientHello::parse(line, 2) {
+        Some(Ok(h)) => h,
+        Some(Err(e)) => return bad(e.to_string()),
+        None => return bad("no token".into()),
+    };
+    let key = hello.prefix[1].wrapping_sub(32);
+    log!(
+        "client {id} secure login SEI00001, inner token {}, list {}",
+        show(&hello.inner),
+        show(&hello.suffix)
+    );
+    let (s1, opener) = match hello.respond(identity) {
+        Ok(r) => r,
+        Err(e) => return bad(e.to_string()),
+    };
+    send(writer, coding, &[s1])?;
+    let body = wire::read_frame(reader)?;
+    let raw = match coding.decode(body) {
+        Ok(r) => r,
+        Err(e) => return bad(format!("undecodable C2 frame ({e})")),
+    };
+    let Some(c2) = wire::lines(&raw).next() else {
+        return bad("empty C2 frame".into());
+    };
+    let tail = match opener.open(c2) {
+        Ok(t) => t,
+        Err(e) => return bad(e.to_string()),
+    };
+    *coding = Coding::Gen5 {
+        cin: Gen5::new(key),
+        cout: Gen5::new(key),
+    };
+    answer_account(writer, coding, id, shared, &tail)?;
+    Ok(())
 }
 
 fn status(shared: &Shared, account: &[u8]) -> Vec<u8> {

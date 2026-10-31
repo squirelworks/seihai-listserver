@@ -22,6 +22,7 @@ fn seihai_list_only_for_each_shape() {
         gserver_port: 0,
         client_ports: vec![0],
         accounts,
+        secure_login_key: dir.path().join("seihai-login.key"),
         ..Config::default()
     };
     let run = seihai_listserver::start(cfg).unwrap();

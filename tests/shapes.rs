@@ -100,6 +100,7 @@ impl Lab {
             gserver_port: 0,
             client_ports: vec![0, 0, 0],
             site_url: "http://127.0.0.1/site".into(),
+            secure_login_key: dir.path().join("seihai-login.key"),
             ..Config::default()
         };
         if !accounts.is_empty() {
