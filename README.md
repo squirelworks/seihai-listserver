@@ -107,11 +107,12 @@ skipped with a warning; add those accounts again with `add-account`.
 | 2.17 (shape B) | id 0 + id 1 account in one frame | the same, once |
 | 2.19 to 2.21 (gen 4) | id 4 key + token, then id 1 | id 0 + id 2 in one bz2, partly XORed frame |
 | 2.22, 2.31, 3.x (gen 5) | id 7 key + token + list name, then id 1 | two gen-5 zlib frames: id 0; id 2, id 3 site URL, id 5 upgrade URL |
-| RC (gen 5) | id 5 key + token, then id 1 | as gen 5 |
+| RC (gen 5) | id 5 key + token, then id 1 | as gen 5, and hidden servers |
 
-gen 4 and gen 5 lists carry the HQ level tag (`U ` hidden, `H ` bronze, none
-for classic, `P ` gold, `3 ` G3D). A refused login gets id 4 and the link
-closes. Gservers: `REGISTERV3`, `NEWSERVER`, `SERVERHQPASS`, `SERVERHQLEVEL`,
+gen 4 and gen 5 lists carry the HQ level tag (`H ` bronze, none for
+classic, `P ` gold, `3 ` G3D). HQ level 0 is hidden: that gserver appears
+only on the RC list (client id 5), tagged `U `, and is left off the other
+lists. A refused login gets id 4 and the link closes. Gservers: `REGISTERV3`, `NEWSERVER`, `SERVERHQPASS`, `SERVERHQLEVEL`,
 `SETPLYR`, `PLYRADD`, `PLYRREM`, `VERIACC2`, `SETIP`, `PING`, `SENDTEXT`. A
 gserver's entry is dropped when its link closes or is silent for
 `gserver_timeout_secs`.

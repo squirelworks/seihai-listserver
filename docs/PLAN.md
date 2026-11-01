@@ -16,7 +16,8 @@ Client side, by login shape:
 - **id 0 + id 1 account/password in one frame** (2.17; shape B): the same reply, once,
   after the account.
 - **id 4 key + token** (gen 4, 2.19 to 2.21): bz2 frames, partial XOR.
-- **id 5 key + token** (RC list, gen 5): every server, type-tagged.
+- **id 5 key + token** (RC list, gen 5): every server, type-tagged,
+  including HQ level 0.
 - **id 7 key + token + list name** (gen 5, 2.22 and 2.31): after id 1, two zlib
   frames: id 0 list; then id 2 status, id 3 site URL, id 5 upgrade URL.
 - A refused login gets id 4 (error text) and the link is closed.
@@ -27,8 +28,8 @@ Gserver side: `SVO_REGISTERV3` (one uncompressed line), then zlib frames:
 `PLYRADD` (14), `PLYRREM` (15), `VERIACC2` (17, answered with `SVI_VERIACC2` 11:
 SUCCESS or the account error), `SETIP` (5, beta4's 60 s keep-alive), `PING` (16,
 logged), `SENDTEXT` (31). A server's entry is dropped when its link closes.
-HQ level to list tag: 0 hidden `U `, 1 bronze `H `, 2 classic (none), 3 gold `P `,
-4 G3D `3 `.
+HQ level to list tag: 0 hidden `U ` (RC list only; public lists omit it),
+1 bronze `H `, 2 classic (none), 3 gold `P `, 4 G3D `3 `.
 
 Accounts: open by default; with an accounts file only listed accounts get in.
 

@@ -345,6 +345,55 @@ fn gen5_and_rc_list_get_two_zlib_frames_tagged() {
     }
 }
 
+/// HQ level 0 is hidden. A public list omits it (and is not tagged `U `).
+/// The RC list (id 5) includes it, tagged `U `. An HQ gold server stays
+/// `P ` on the public list. The allow-list here is empty.
+#[test]
+fn hq_level_zero_is_omitted_from_public_lists_and_shown_on_the_rc_list() {
+    let lab = Lab::start(&[]);
+    let _hidden = register_open(&lab, b"Quiet", 0);
+    let _gold = register_open(&lab, b"TestWorld", 3);
+    wait_listed(&lab, 2);
+
+    let plain = shape_plain(lab.client(0), false);
+    let plain_rows = parse_list(&plain[0]);
+    assert_eq!(plain_rows.len(), 1, "shape A omits HQ level 0");
+    assert_eq!(plain_rows[0][0], b"TestWorld", "shape A stays untagged");
+    assert!(
+        plain
+            .iter()
+            .all(|line| !line.windows(2).any(|w| w == b"U ")),
+        "shape A is not tagged U"
+    );
+    assert!(
+        plain[1][1..].ends_with(b"There are 1 server(s) online."),
+        "the public status counts only the servers on that list"
+    );
+
+    let (_, _, public, _) = shape_gen5(lab.client(1), 7, b"acct", b"pw");
+    let rows = parse_list(&public[0][0]);
+    assert_eq!(rows.len(), 1, "gen 5 omits HQ level 0");
+    assert_eq!(
+        rows[0][0], b"P TestWorld",
+        "an HQ gold server is still tagged P on the public list"
+    );
+    assert!(
+        public
+            .iter()
+            .flatten()
+            .all(|line| !line.windows(2).any(|w| w == b"U ")),
+        "the public gen 5 list is not tagged U"
+    );
+    assert!(public[1][0][1..].ends_with(b"There are 1 server(s) online."));
+
+    let (_, _, rc, _) = shape_gen5(lab.client(1), 5, b"acct", b"pw");
+    let rows = parse_list(&rc[0][0]);
+    assert_eq!(rows.len(), 2, "the RC list includes the hidden server");
+    assert_eq!(rows[0][0], b"U Quiet");
+    assert_eq!(rows[1][0], b"P TestWorld");
+    assert!(rc[1][0][1..].ends_with(b"There are 2 server(s) online."));
+}
+
 #[test]
 fn every_client_port_answers_every_shape() {
     let lab = Lab::start(&[]);
@@ -464,9 +513,9 @@ fn hq_line(password: &[u8]) -> Vec<u8> {
     m
 }
 
-fn newserver_line() -> Vec<u8> {
+fn newserver_named(name: &[u8]) -> Vec<u8> {
     let fields: [&[u8]; 8] = [
-        b"TestWorld",
+        name,
         b"A test server",
         b"English",
         b"3.0.9",
@@ -480,6 +529,22 @@ fn newserver_line() -> Vec<u8> {
         fields.iter().flat_map(|f| gstr(f)).collect(),
     ]
     .concat()
+}
+
+fn newserver_line() -> Vec<u8> {
+    newserver_named(b"TestWorld")
+}
+
+/// Register one gserver on an empty allow-list. The HQ level is sent before
+/// `NEWSERVER`, so the row is never briefly listed at the default bronze level.
+fn register_open(lab: &Lab, name: &[u8], hq_level: usize) -> TcpStream {
+    let mut g = TcpStream::connect(lab.run.gserver_addr).unwrap();
+    register_line(&mut g);
+    send_lines(
+        &mut g,
+        &[vec![gchar(24), gchar(hq_level)], newserver_named(name)],
+    );
+    g
 }
 
 fn wait_listed(lab: &Lab, n: usize) {
