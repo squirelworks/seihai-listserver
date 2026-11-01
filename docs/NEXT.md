@@ -15,9 +15,13 @@ where the code goes.
 3. ~~**Shape S, silent 1.41** (`client.rs`).~~ Done (2026-11-01):
    `silent_list_after_ms` (0 = off). When no byte arrives in that time, the
    shape A reply goes out. Test: connect, send nothing, expect `[0, 2]`.
-4. **Hidden servers** (`state.rs`). HQ level 0 is tagged `U ` for everyone,
-   as in the Python version, and a unit test pins that. Decide with Squirrel
-   whether only the RC list (id 5) should see them.
+4. ~~**Hidden servers** (`state.rs`, `client.rs`).~~ Done (2026-11-01).
+   Squirrel's decision: a gserver with HQ level 0 is hidden. It appears
+   only on the RC list (client id 5), tagged `U `. Public lists omit it
+   and are not tagged `U `. The `{servers}` figure in a client's status
+   is the number of rows on that list. An empty `gservers` allow-list is
+   unchanged. Loopback tests in `tests/shapes.rs`. The Wine client pass
+   in item 1 is still open.
 5. ~~**Login rate limit** (`accounts.rs` or `client.rs`).~~ Done (2026-11-01):
    `login_fail_limit` failed client logins and failed `VERIACC2` checks per
    address, counted apart, inside `login_fail_window_secs`. Over the cap the

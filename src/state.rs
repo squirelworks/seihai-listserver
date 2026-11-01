@@ -30,8 +30,11 @@ pub struct Entry {
     pub players: BTreeSet<u16>,
 }
 
-/// The tag in front of a server name in a tagged list (gen 4 and 5):
+/// The tag in front of a server name in a tagged list (gen 4, gen 5, RC):
 /// 0 hidden `U `, 1 bronze `H `, 2 classic (none), 3 gold `P `, 4 G3D `3 `.
+///
+/// HQ level 0 is not put on a public list at all. [`hq_tag`] is applied
+/// only when the list includes that server (the RC list).
 pub fn hq_tag(level: usize) -> &'static [u8] {
     match level {
         0 => b"U ",
@@ -40,6 +43,26 @@ pub fn hq_tag(level: usize) -> &'static [u8] {
         4 => b"3 ",
         _ => b"",
     }
+}
+
+/// Who the id 0 list is for.
+///
+/// HQ level 0 is hidden. It is included only for [`ListFor::Rc`] (client
+/// id 5), tagged `U `. Every other list omits it, so those lists are not
+/// tagged `U `. Squirrel, 2026-11-01 (`docs/NEXT.md`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListFor {
+    /// No HQ tags (2.00 to 2.17, and a silent 1.41).
+    Plain,
+    /// HQ tags, hidden servers omitted (gen 4, gen 5, the secure login).
+    Tagged,
+    /// The RC list (client id 5): HQ tags, hidden servers included.
+    Rc,
+}
+
+/// A named gserver is shown to `who`. HQ level 0 is shown only on the RC list.
+fn shown(entry: &Entry, who: ListFor) -> bool {
+    entry.name.is_some() && (who == ListFor::Rc || entry.hq_level != 0)
 }
 
 /// All gservers, in the order they connected.
@@ -70,12 +93,18 @@ impl Servers {
         self.lock().get_mut(&id).map(f)
     }
 
-    /// Number of listed gservers.
+    /// Number of named gservers, including hidden ones. The status log uses
+    /// this. A client's `{servers}` figure is [`Self::listed_for`].
     pub fn listed(&self) -> usize {
         self.counts().0
     }
 
-    /// Listed gservers, and the players on them.
+    /// Named gservers that `who` is shown. HQ level 0 counts only for the RC list.
+    pub fn listed_for(&self, who: ListFor) -> usize {
+        self.lock().values().filter(|e| shown(e, who)).count()
+    }
+
+    /// Named gservers, and the players on them, including hidden servers.
     pub fn counts(&self) -> (usize, usize) {
         let entries = self.lock();
         let mut servers = 0;
@@ -95,20 +124,23 @@ impl Servers {
         format!("status: {servers} server(s), {players} player(s)")
     }
 
-    /// The id 0 server list message, with or without HQ tags.
-    pub fn list_message(&self, tagged: bool) -> Vec<u8> {
+    /// The id 0 server list message for `who`.
+    ///
+    /// A named gserver with HQ level 0 is left out unless `who` is the RC
+    /// list. Tags are applied for [`ListFor::Tagged`] and [`ListFor::Rc`].
+    pub fn list_message(&self, who: ListFor) -> Vec<u8> {
         let entries = self.lock();
         let rows: Vec<&Entry> = entries
             .values()
-            .filter(|e| e.name.is_some())
+            .filter(|e| shown(e, who))
             .take(GCHAR_MAX)
             .collect();
         let mut out = vec![gchar(plo::SVRLIST), gchar(rows.len())];
         for e in rows {
-            let mut name = if tagged {
-                hq_tag(e.hq_level).to_vec()
-            } else {
+            let mut name = if who == ListFor::Plain {
                 Vec::new()
+            } else {
+                hq_tag(e.hq_level).to_vec()
             };
             name.extend_from_slice(e.name.as_deref().unwrap_or_default());
             let players = e.players.len().to_string();
@@ -190,14 +222,14 @@ mod tests {
             e.players.insert(7);
         });
         let parsed = seihai_core::protocol::parse_list_reply(
-            &[s.list_message(true), b"\n".to_vec()].concat(),
+            &[s.list_message(ListFor::Tagged), b"\n".to_vec()].concat(),
         );
         assert_eq!(parsed.servers.len(), 1);
         assert_eq!(parsed.servers[0].kind, "P");
         assert_eq!(parsed.servers[0].name, "World");
         assert_eq!(parsed.servers[0].players, Some(1));
         let plain = seihai_core::protocol::parse_list_reply(
-            &[s.list_message(false), b"\n".to_vec()].concat(),
+            &[s.list_message(ListFor::Plain), b"\n".to_vec()].concat(),
         );
         assert_eq!(plain.servers[0].kind, "");
     }
@@ -216,27 +248,56 @@ mod tests {
         assert_eq!(s.status_line(), "status: 1 server(s), 2 player(s)");
     }
 
-    /// HQ level 0 stays on every list, tagged `U ` only when the list is
-    /// tagged. Whether only the RC list should see it is still open
+    /// HQ level 0 is hidden: the RC list includes it, tagged `U `. Public
+    /// lists omit it, so they are not tagged `U `. Squirrel, 2026-11-01
     /// (`docs/NEXT.md`).
     #[test]
-    fn hq_level_zero_is_listed_for_every_shape() {
+    fn hq_level_zero_is_listed_only_on_the_rc_list() {
         let s = Servers::default();
         s.insert(1);
         s.update(1, |e| {
             e.name = Some(b"Quiet".to_vec());
             e.hq_level = 0;
         });
-        let tagged = seihai_core::protocol::parse_list_reply(
-            &[s.list_message(true), b"\n".to_vec()].concat(),
+        s.insert(2);
+        s.update(2, |e| {
+            e.name = Some(b"World".to_vec());
+            e.hq_level = 3;
+        });
+        // A hidden gserver with no name is not a list row for anyone.
+        s.insert(3);
+        s.update(3, |e| e.hq_level = 0);
+
+        assert_eq!(s.listed(), 2, "the table still counts the hidden gserver");
+        assert_eq!(s.listed_for(ListFor::Rc), 2);
+        assert_eq!(s.listed_for(ListFor::Plain), 1);
+        assert_eq!(s.listed_for(ListFor::Tagged), 1);
+
+        let rc = seihai_core::protocol::parse_list_reply(
+            &[s.list_message(ListFor::Rc), b"\n".to_vec()].concat(),
         );
-        assert_eq!(tagged.servers.len(), 1);
-        assert_eq!(tagged.servers[0].kind, "U");
-        assert_eq!(tagged.servers[0].name, "Quiet");
-        let plain = seihai_core::protocol::parse_list_reply(
-            &[s.list_message(false), b"\n".to_vec()].concat(),
-        );
-        assert_eq!(plain.servers[0].kind, "");
-        assert_eq!(plain.servers[0].name, "Quiet");
+        assert_eq!(rc.servers.len(), 2);
+        assert_eq!(rc.servers[0].kind, "U");
+        assert_eq!(rc.servers[0].name, "Quiet");
+        assert_eq!(rc.servers[1].kind, "P");
+        assert_eq!(rc.servers[1].name, "World");
+
+        for who in [ListFor::Plain, ListFor::Tagged] {
+            let parsed = seihai_core::protocol::parse_list_reply(
+                &[s.list_message(who), b"\n".to_vec()].concat(),
+            );
+            assert_eq!(parsed.servers.len(), 1, "{who:?}");
+            assert_eq!(parsed.servers[0].name, "World", "{who:?}");
+            assert_ne!(parsed.servers[0].kind, "U", "{who:?}");
+            let raw = s.list_message(who);
+            assert!(
+                !raw.windows(b"Quiet".len()).any(|w| w == b"Quiet"),
+                "{who:?} omits the hidden server"
+            );
+            assert!(
+                !raw.windows(2).any(|w| w == b"U "),
+                "{who:?} is not tagged U"
+            );
+        }
     }
 }

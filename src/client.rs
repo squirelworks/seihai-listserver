@@ -17,15 +17,16 @@
 //!   hello in a plain frame, then the sealed id 1 in a plain frame, then the
 //!   gen-5 reply as for id 7. See Seihai's `documentation/secure-login.md`.
 //!
-//! The list is tagged with the HQ level for gen 4 and gen 5 only. A refused
-//! login gets id 4 (the error text) and the link is closed.
+//! The list is tagged with the HQ level for gen 4, gen 5 and the RC list.
+//! HQ level 0 is hidden: only the RC list (id 5) includes it, tagged `U `.
+//! A refused login gets id 4 (the error text) and the link is closed.
 //!
 //! Shape S (real 1.41 rev 1) sends nothing. When `silent_list_after_ms` is
 //! set and no byte arrives in that time, the shape A reply goes out.
 
 use crate::accounts::GuessKind;
 use crate::server::Shared;
-use crate::state::{plo, status_message};
+use crate::state::{plo, status_message, ListFor};
 use crate::wire::{self, gchar, show, Fields};
 use seihai_core::protocol::seclogin::{self, ClientHello};
 use seihai_core::protocol::{
@@ -50,8 +51,9 @@ enum Coding {
     Plain,
     /// bz2 and the partial XOR, no compression byte (2.19 to 2.21).
     Gen4 { cin: Gen5, cout: Gen5 },
-    /// Compression byte and the partial XOR (2.22 and later, the RC list).
-    Gen5 { cin: Gen5, cout: Gen5 },
+    /// Compression byte and the partial XOR (2.22 and later). `rc` is the
+    /// RC list (client id 5); id 7 and the secure login leave it false.
+    Gen5 { cin: Gen5, cout: Gen5, rc: bool },
 }
 
 impl Coding {
@@ -102,8 +104,15 @@ impl Coding {
         })
     }
 
-    fn tagged(&self) -> bool {
-        !matches!(self, Self::Plain)
+    /// Which id 0 list this link gets. Hidden servers (HQ level 0) are
+    /// included only after an id 5 handshake.
+    fn list_for(&self) -> ListFor {
+        match self {
+            Self::Plain => ListFor::Plain,
+            Self::Gen4 { .. } => ListFor::Tagged,
+            Self::Gen5 { rc: true, .. } => ListFor::Rc,
+            Self::Gen5 { rc: false, .. } => ListFor::Tagged,
+        }
     }
 }
 
@@ -129,8 +138,12 @@ fn run(stream: TcpStream, id: u64, shared: &Shared, peer: Option<IpAddr>) -> io:
         match first_byte_ready(reader.get_ref(), silent) {
             Ok(false) => {
                 log!("client {id} sent nothing; sending the list");
-                let list = shared.servers.list_message(false);
-                send(&mut writer, &mut coding, &[list, status(shared, b"player")])?;
+                let list = shared.servers.list_message(ListFor::Plain);
+                send(
+                    &mut writer,
+                    &mut coding,
+                    &[list, status(shared, b"player", ListFor::Plain)],
+                )?;
             }
             Ok(true) => {}
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
@@ -173,8 +186,12 @@ fn run(stream: TcpStream, id: u64, shared: &Shared, peer: Option<IpAddr>) -> io:
                     log!("client {id} list name {}", show(payload));
                     // 2.00 and 2.05 send the list name only and get the list at once.
                     if !has_account {
-                        let list = shared.servers.list_message(false);
-                        send(&mut writer, &mut coding, &[list, status(shared, b"player")])?;
+                        let list = shared.servers.list_message(ListFor::Plain);
+                        send(
+                            &mut writer,
+                            &mut coding,
+                            &[list, status(shared, b"player", ListFor::Plain)],
+                        )?;
                     }
                 }
                 pli::V2ENCRYPTKEYCL if payload.get(1..9).is_some_and(seclogin::is_token) => {
@@ -200,7 +217,11 @@ fn run(stream: TcpStream, id: u64, shared: &Shared, peer: Option<IpAddr>) -> io:
                     coding = if pid == pli::V2VER {
                         Coding::Gen4 { cin, cout }
                     } else {
-                        Coding::Gen5 { cin, cout }
+                        Coding::Gen5 {
+                            cin,
+                            cout,
+                            rc: pid == pli::V2SERVERLISTRC,
+                        }
                     };
                     let token = payload.get(1..9).unwrap_or_default();
                     let list = payload.get(9..).unwrap_or_default();
@@ -267,8 +288,9 @@ fn answer_account(
         refuse(writer, coding, err)?;
         return Ok(true);
     }
-    let list = shared.servers.list_message(coding.tagged());
-    let status = status(shared, account);
+    let who = coding.list_for();
+    let list = shared.servers.list_message(who);
+    let status = status(shared, account, who);
     if let Coding::Gen5 { .. } = coding {
         send(writer, coding, &[list])?;
         let cfg = shared.config();
@@ -340,21 +362,23 @@ fn secure_login<R: Read>(
         Ok(t) => t,
         Err(e) => return bad(e.to_string()),
     };
+    // A Seihai player, not the RC list: hidden servers stay off.
     *coding = Coding::Gen5 {
         cin: Gen5::new(key),
         cout: Gen5::new(key),
+        rc: false,
     };
     answer_account(writer, coding, id, shared, peer, &tail)?;
     Ok(())
 }
 
-fn status(shared: &Shared, account: &[u8]) -> Vec<u8> {
+fn status(shared: &Shared, account: &[u8], who: ListFor) -> Vec<u8> {
     let cfg = shared.config();
     status_message(
         &cfg.status,
         &cfg.list_name,
         account,
-        shared.servers.listed(),
+        shared.servers.listed_for(who),
     )
 }
 
