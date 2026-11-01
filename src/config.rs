@@ -4,6 +4,17 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// One gserver that may register when [`Config::gservers`] is not empty.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GserverAllow {
+    /// Address the gserver's link comes from, such as `127.0.0.1`.
+    pub ip: String,
+    /// Password carried as the raw rest of a `SERVERHQPASS` line (not a
+    /// GSTRING). It must match before that link's `NEWSERVER` is listed.
+    pub hq_password: String,
+}
+
 /// Which address the list gives clients for a gserver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -57,6 +68,10 @@ pub struct Config {
     /// Refuse gserver links that are not encrypted (GServer-v2 and the
     /// fork speak only the plain link). Off by default.
     pub require_secure_gserver_link: bool,
+    /// When non-empty, only these addresses may register, and a server is
+    /// listed only after `SERVERHQPASS` matches that address's
+    /// `hq_password`. Empty: any link may register.
+    pub gservers: Vec<GserverAllow>,
 }
 
 impl Default for Config {
@@ -78,6 +93,7 @@ impl Default for Config {
             secure_login_key: PathBuf::from("seihai-login.key"),
             require_secure_login: false,
             require_secure_gserver_link: false,
+            gservers: Vec::new(),
         }
     }
 }
@@ -124,6 +140,17 @@ impl Config {
                 return Err(format!("{key} must be one line"));
             }
         }
+        for g in &self.gservers {
+            if g.ip.parse::<std::net::IpAddr>().is_err() {
+                return Err(format!(
+                    "gservers ip must be an address such as 127.0.0.1, not {:?}",
+                    g.ip
+                ));
+            }
+            if g.hq_password.contains(['\n', '\r']) {
+                return Err("gservers hq_password must be one line".into());
+            }
+        }
         Ok(())
     }
 
@@ -160,6 +187,25 @@ mod tests {
         assert_eq!(s.secure_login_key, d.secure_login_key);
         assert_eq!(s.require_secure_login, d.require_secure_login);
         assert_eq!(s.require_secure_gserver_link, d.require_secure_gserver_link);
+        assert!(s.gservers.is_empty());
+    }
+
+    #[test]
+    fn gserver_allow_list_parses_loopback_and_rejects_bad_rows() {
+        let c = Config::parse(
+            "gservers = [{ ip = \"127.0.0.1\", hq_password = \"lab\" }, { ip = \"::1\", hq_password = \"\" }]",
+        )
+        .unwrap();
+        assert_eq!(c.gservers[0].ip, "127.0.0.1");
+        assert_eq!(c.gservers[0].hq_password, "lab");
+        assert_eq!(c.gservers[1].hq_password, "");
+        assert!(
+            Config::parse("gservers = [{ ip = \"not-an-address\", hq_password = \"x\" }]").is_err()
+        );
+        assert!(
+            Config::parse("gservers = [{ ip = \"127.0.0.1\", hq_password = \"a\\nb\" }]").is_err()
+        );
+        assert!(Config::parse("gservers = [{ ip = \"127.0.0.1\" }]").is_err());
     }
 
     #[test]

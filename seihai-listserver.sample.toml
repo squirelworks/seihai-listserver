@@ -9,6 +9,12 @@ bind = "127.0.0.1"
 # Port gservers register on. When hosting, open it only to your gservers.
 gserver_port = 14900
 
+# Which gservers may register. Empty (the default): any link to
+# gserver_port may register. When set, other addresses are dropped, and a
+# server is listed only after SERVERHQPASS matches hq_password. That
+# password is the raw rest of the SERVERHQPASS line, sent before NEWSERVER.
+# gservers = [{ ip = "127.0.0.1", hq_password = "change-me" }]
+
 # Ports clients ask for the list on. Every port answers every login shape
 # (2.00/2.05, 2.17, 2.19-2.21, 2.22/2.31, 3.x and the RC list).
 client_ports = [14921, 14922, 14923]

@@ -11,13 +11,18 @@
 //! the inner token `SVLINK01`, S1 back, then the same classic link inside
 //! ChaCha20-Poly1305 records, so players' passwords in `VERIACC2` never
 //! cross the wire in the clear.
+//!
+//! When `gservers` is set, a link from any other address is dropped, and
+//! `NEWSERVER` (and account checks) are ignored until `SERVERHQPASS`
+//! matches that address's password. An empty list keeps the open behaviour.
 
+use crate::config::Config;
 use crate::server::Shared;
 use crate::wire::{self, gchar, put_gstr, show, Fields};
 use seihai_core::protocol::seclogin::{self, ClientHello};
 use seihai_core::protocol::{write_zlib_frame, zlib_decompress};
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
+use std::net::{IpAddr, TcpStream};
 
 /// Gserver to listserver ids.
 pub mod svo {
@@ -43,13 +48,15 @@ pub mod svi {
 const MAX_REGISTER: u64 = 1024;
 
 pub fn serve(stream: TcpStream, id: u64, shared: &Shared) {
-    let peer = stream
-        .peer_addr()
-        .map(|a| a.ip().to_string())
-        .unwrap_or_default();
+    let peer_ip = stream.peer_addr().ok().map(|a| a.ip());
+    let peer = peer_ip.map(|ip| ip.to_string()).unwrap_or_default();
+    let Some(auth) = auth_for(&shared.config, peer_ip) else {
+        log!("gserver {id} refused: {peer} is not in the gserver allow-list");
+        return;
+    };
     log!("gserver {id} connected from {peer}");
     shared.servers.insert(id);
-    let result = run(stream, id, &peer, shared);
+    let result = run(stream, id, &peer, shared, auth);
     let entry = shared.servers.remove(id);
     let name = entry
         .and_then(|e| e.name)
@@ -97,9 +104,7 @@ fn first_line<R: BufRead>(r: &mut R) -> io::Result<Vec<u8>> {
     Ok(line)
 }
 
-// TODO(docs/NEXT.md item 2): an allow-list of gserver addresses and HQ
-// passwords; today any link to the gserver port can register.
-fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared) -> io::Result<()> {
+fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared, mut auth: Auth) -> io::Result<()> {
     stream.set_read_timeout(Some(shared.config.gserver_timeout()))?;
     let writer = stream.try_clone()?;
     let mut link = Duplex {
@@ -112,7 +117,7 @@ fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared) -> io::Result<()
             log!("gserver {id} plain link refused (require_secure_gserver_link)");
             return Ok(());
         }
-        return session(&mut BufReader::new(link), line, id, peer, shared);
+        return session(&mut BufReader::new(link), line, id, peer, shared, &mut auth);
     }
     // The encrypted link: C1 here, S1 back, then records both ways.
     let Some(identity) = shared.identity.as_ref() else {
@@ -138,7 +143,7 @@ fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared) -> io::Result<()
     );
     let mut inner = BufReader::new(opener.into_channel().wrap(link));
     let line = first_line(&mut inner)?;
-    session(&mut inner, line, id, peer, shared)
+    session(&mut inner, line, id, peer, shared, &mut auth)
 }
 
 /// The classic link from its first line (`reg`, the `REGISTERV3` line) on,
@@ -149,6 +154,7 @@ fn session<S: Read + Write>(
     id: u64,
     peer: &str,
     shared: &Shared,
+    auth: &mut Auth,
 ) -> io::Result<()> {
     let reg_id = reg[0].wrapping_sub(32) as usize;
     let reg = &reg[1..reg.len() - 1];
@@ -175,19 +181,114 @@ fn session<S: Read + Write>(
             }
         };
         for line in wire::lines(&raw) {
-            if let Some(reply) = handle(line, id, peer, shared) {
-                let w = link.get_mut();
-                w.write_all(&write_zlib_frame(&reply)?)?;
-                w.flush()?;
+            match handle(line, id, peer, shared, auth) {
+                Step::Quiet => {}
+                Step::Reply(reply) => {
+                    let w = link.get_mut();
+                    w.write_all(&write_zlib_frame(&reply)?)?;
+                    w.flush()?;
+                }
+                Step::Close => return Ok(()),
             }
         }
     }
 }
 
-/// Handle one message; the reply line (with its line feed), if any.
-fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared) -> Option<Vec<u8>> {
+/// What one gserver message asks the link to do.
+enum Step {
+    Quiet,
+    Reply(Vec<u8>),
+    Close,
+}
+
+/// Whether this link may change the list or check accounts.
+///
+/// `passwords` is `None` when `gservers` is empty (any link may register).
+/// Otherwise it holds the HQ passwords configured for this address, and
+/// `ok` stays false until `SERVERHQPASS` matches one of them.
+struct Auth {
+    passwords: Option<Vec<Vec<u8>>>,
+    ok: bool,
+}
+
+impl Auth {
+    fn open() -> Self {
+        Self {
+            passwords: None,
+            ok: true,
+        }
+    }
+
+    fn waiting(passwords: Vec<Vec<u8>>) -> Self {
+        Self {
+            passwords: Some(passwords),
+            ok: false,
+        }
+    }
+}
+
+/// `None` drops the link. An empty allow-list is open for every address.
+fn auth_for(cfg: &Config, peer: Option<IpAddr>) -> Option<Auth> {
+    if cfg.gservers.is_empty() {
+        return Some(Auth::open());
+    }
+    let peer = peer?;
+    let passwords: Vec<Vec<u8>> = cfg
+        .gservers
+        .iter()
+        .filter(|g| g.ip.parse::<IpAddr>().ok() == Some(peer))
+        .map(|g| g.hq_password.as_bytes().to_vec())
+        .collect();
+    if passwords.is_empty() {
+        None
+    } else {
+        Some(Auth::waiting(passwords))
+    }
+}
+
+/// `true` when `payload` matches a configured HQ password. A mismatch
+/// leaves `auth` unchanged.
+fn accept_password(auth: &mut Auth, payload: &[u8]) -> bool {
+    let Some(passwords) = &auth.passwords else {
+        return true;
+    };
+    if matches_any(passwords, payload) {
+        auth.ok = true;
+        true
+    } else {
+        false
+    }
+}
+
+fn matches_any(passwords: &[Vec<u8>], payload: &[u8]) -> bool {
+    let mut ok = false;
+    for password in passwords {
+        ok |= bytes_eq(password, payload);
+    }
+    ok
+}
+
+fn bytes_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+/// Handle one message.
+fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) -> Step {
     let pid = line[0].wrapping_sub(32) as usize;
     let mut p = Fields::new(&line[1..]);
+    // Account checks and the list entry stay closed until the HQ password
+    // matches. SETIP and PING carry no list state.
+    if !auth.ok && !matches!(pid, svo::SERVERHQPASS | svo::SETIP | svo::PING) {
+        log!("gserver {id} ignored id {pid}: hq password not accepted yet");
+        return Step::Quiet;
+    }
     match pid {
         svo::NEWSERVER => {
             let mut f: Vec<Vec<u8>> = Vec::with_capacity(8);
@@ -195,8 +296,12 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared) -> Option<Vec<u8>> 
                 // The last field (local IP) may be missing on some gservers.
                 f.push(p.gstr().unwrap_or_default().to_vec());
             }
-            let [name, desc, lang, ver, url, sent_ip, port, _local_ip]: [Vec<u8>; 8] =
-                f.try_into().ok()?;
+            let Ok([name, desc, lang, ver, url, sent_ip, port, _local_ip]): Result<
+                [Vec<u8>; 8],
+                _,
+            > = f.try_into() else {
+                return Step::Quiet;
+            };
             let ip = match shared.config.gserver_ip {
                 crate::config::GserverIp::Sent
                     if !sent_ip.is_empty() && !sent_ip.eq_ignore_ascii_case(b"AUTO") =>
@@ -221,20 +326,24 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared) -> Option<Vec<u8>> 
                 e.ip = ip;
                 e.port = port;
             });
-            None
+            Step::Quiet
         }
         svo::SERVERHQLEVEL => {
-            let level = p.gchar()?;
+            let Some(level) = p.gchar() else {
+                return Step::Quiet;
+            };
             shared.servers.update(id, |e| e.hq_level = level);
             log!("gserver {id} hq level {level}");
-            None
+            Step::Quiet
         }
         svo::SETPLYR => {
             shared.servers.update(id, |e| e.players.clear());
-            None
+            Step::Quiet
         }
         svo::PLYRADD => {
-            let player = p.gshort()?;
+            let Some(player) = p.gshort() else {
+                return Step::Quiet;
+            };
             let kind = p.gchar().unwrap_or(0);
             let now = shared.servers.update(id, |e| {
                 e.players.insert(player);
@@ -244,22 +353,32 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared) -> Option<Vec<u8>> 
                 "gserver {id} player add {player} type {kind}, now {}",
                 now.unwrap_or(0)
             );
-            None
+            Step::Quiet
         }
         svo::PLYRREM => {
-            let player = p.gshort()?;
+            let Some(player) = p.gshort() else {
+                return Step::Quiet;
+            };
             let now = shared.servers.update(id, |e| {
                 e.players.remove(&player);
                 e.players.len()
             });
             log!("gserver {id} player rem {player}, now {}", now.unwrap_or(0));
-            None
+            Step::Quiet
         }
         svo::VERIACC2 => {
-            let account = p.gstr()?;
-            let password = p.gstr()?;
-            let player = p.bytes(2)?;
-            let kind = p.bytes(1)?;
+            let Some(account) = p.gstr() else {
+                return Step::Quiet;
+            };
+            let Some(password) = p.gstr() else {
+                return Step::Quiet;
+            };
+            let Some(player) = p.bytes(2) else {
+                return Step::Quiet;
+            };
+            let Some(kind) = p.bytes(1) else {
+                return Step::Quiet;
+            };
             // beta4 appends a GSHORT length and an identity string.
             let identity = p
                 .gshort()
@@ -278,17 +397,75 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared) -> Option<Vec<u8>> 
             out.extend_from_slice(kind);
             out.extend_from_slice(err.unwrap_or(b"SUCCESS"));
             out.push(b'\n');
-            Some(out)
+            Step::Reply(out)
         }
-        // Keep-alive, pong and HQ password: nothing to answer.
-        svo::SETIP | svo::PING | svo::SERVERHQPASS => None,
+        // The password is the raw rest of the line, not a GSTRING. Gservers
+        // send it before NEWSERVER; a later repeat must still match.
+        svo::SERVERHQPASS => {
+            if auth.passwords.is_none() {
+                return Step::Quiet;
+            }
+            let was_ok = auth.ok;
+            if accept_password(auth, p.rest()) {
+                if !was_ok {
+                    log!("gserver {id} hq password accepted");
+                }
+                Step::Quiet
+            } else {
+                log!("gserver {id} hq password refused");
+                Step::Close
+            }
+        }
+        // Keep-alive and pong: nothing to answer.
+        svo::SETIP | svo::PING => Step::Quiet,
         svo::SENDTEXT => {
             log!("gserver {id} sendtext {}", show(p.rest()));
-            None
+            Step::Quiet
         }
         _ => {
             log!("gserver {id} unhandled id {pid}: {}", show(p.rest()));
-            None
+            Step::Quiet
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv6Addr;
+
+    fn cfg(text: &str) -> Config {
+        Config::parse(text).unwrap()
+    }
+
+    #[test]
+    fn empty_allow_list_is_open() {
+        let auth = auth_for(&cfg(""), Some(IpAddr::from([127, 0, 0, 1]))).unwrap();
+        assert!(auth.ok);
+        assert!(auth.passwords.is_none());
+    }
+
+    #[test]
+    fn other_loopback_is_refused_and_either_password_matches() {
+        let c = cfg(r#"
+            gservers = [
+                { ip = "127.0.0.1", hq_password = "one" },
+                { ip = "127.0.0.1", hq_password = "two" },
+            ]
+            "#);
+        assert!(auth_for(&c, Some(IpAddr::V6(Ipv6Addr::LOCALHOST))).is_none());
+        assert!(auth_for(&c, None).is_none());
+        let mut auth = auth_for(&c, Some(IpAddr::from([127, 0, 0, 1]))).unwrap();
+        assert!(!auth.ok);
+        assert!(!accept_password(&mut auth, b"no"));
+        assert!(!auth.ok);
+        assert!(accept_password(&mut auth, b"two"));
+        assert!(auth.ok);
+        assert!(accept_password(&mut auth, b"one"));
+        assert!(!accept_password(&mut auth, b"two-no"));
+        assert!(
+            auth.ok,
+            "the helper leaves the flag; the link handler closes"
+        );
     }
 }

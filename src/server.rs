@@ -79,6 +79,14 @@ pub fn start(config: Config) -> Result<Running, String> {
             .join(", "),
         shared.accounts.describe()
     );
+    if shared.config.gservers.is_empty() {
+        log!("gserver allow-list: off");
+    } else {
+        log!(
+            "gserver allow-list: {} entries",
+            shared.config.gservers.len()
+        );
+    }
 
     spawn_accept(gserver, shared.clone(), |s, id, _port, shared| {
         crate::gserver::serve(s, id, shared)
