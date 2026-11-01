@@ -17,6 +17,10 @@ usage:
       or else as one line from standard input. Only an argon2 hash is stored.
   seihai-listserver sample-config
       Print a config file with every setting at its default.
+  seihai-listserver key-fingerprint [FILE]
+      Print the secure-login public key and fingerprint in FILE.
+      FILE defaults to seihai-login.key. The listserver is not started,
+      and a missing file is not created.
   seihai-listserver --version";
 
 fn main() {
@@ -26,6 +30,7 @@ fn main() {
         Some("--help" | "-h") => println!("{USAGE}"),
         Some("sample-config") => print!("{}", config::SAMPLE),
         Some("add-account") => add_account(&args[1..]),
+        Some("key-fingerprint") => key_fingerprint(&args[1..]),
         Some("--config") if args.len() == 2 => run(Some(Path::new(&args[1]))),
         None => run(None),
         _ => {
@@ -52,11 +57,22 @@ fn run(path: Option<&Path>) {
         env!("CARGO_PKG_VERSION"),
         path.map_or("(defaults)".into(), |p| p.display().to_string())
     ));
-    if let Err(e) = seihai_listserver::start(cfg) {
+    if let Err(e) = seihai_listserver::start_at(cfg, path.map(|p| p.to_path_buf())) {
         fail(&e);
     }
     loop {
         std::thread::park();
+    }
+}
+
+fn key_fingerprint(args: &[String]) {
+    match seihai_listserver::fingerprint_command(args) {
+        Ok(Some(text)) => print!("{text}"),
+        Ok(None) => {
+            eprintln!("{USAGE}");
+            exit(2);
+        }
+        Err(e) => fail(&e),
     }
 }
 

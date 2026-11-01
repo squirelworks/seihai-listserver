@@ -16,4 +16,4 @@ pub mod state;
 pub mod wire;
 
 pub use config::Config;
-pub use server::{start, Running};
+pub use server::{fingerprint_command, login_key_lines, start, start_at, Running};

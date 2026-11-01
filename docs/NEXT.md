@@ -12,21 +12,23 @@ where the code goes.
    links from other addresses are dropped, and `NEWSERVER` is listed only
    after `SERVERHQPASS` matches. Empty keeps the open behaviour. Tests in
    `tests/shapes.rs`.
-3. **Shape S, silent 1.41** (`client.rs`). Real 1.41 rev 1 connects and waits
-   for the list. Add `silent_list_after_ms` (0 = off): when no frame arrives
-   in that time, send the shape A reply. Test: connect, send nothing, expect
-   `[0, 2]`.
+3. ~~**Shape S, silent 1.41** (`client.rs`).~~ Done (2026-11-01):
+   `silent_list_after_ms` (0 = off). When no byte arrives in that time, the
+   shape A reply goes out. Test: connect, send nothing, expect `[0, 2]`.
 4. **Hidden servers** (`state.rs`). HQ level 0 is tagged `U ` for everyone,
-   as in the Python version. Decide with Squirrel whether only the RC list
-   (id 5) should see them.
-5. **Login rate limit** (`accounts.rs` or `client.rs`). Per-address limit on
-   failed logins and `VERIACC2` checks, so a public listserver is not a
-   password oracle. Argon2 makes each guess slow, but there is no cap.
-6. **Reload on signal / admin** (`main.rs`). Config reload without restart,
-   and a status line (servers, players) every few minutes in the log.
-7. **seihai-rc integration.** The RC list (id 5) is already answered; once
-   `seihai-rc` stage 1 exists, add a test there that logs in through this
-   listserver.
+   as in the Python version, and a unit test pins that. Decide with Squirrel
+   whether only the RC list (id 5) should see them.
+5. ~~**Login rate limit** (`accounts.rs` or `client.rs`).~~ Done (2026-11-01):
+   `login_fail_limit` failed client logins and failed `VERIACC2` checks per
+   address, counted apart, inside `login_fail_window_secs`. Over the cap the
+   password is not checked. 0 on either setting turns the cap off.
+6. ~~**Reload on signal / admin** (`main.rs`).~~ Done (2026-11-01): the config
+   file is read again when it changes, and on SIGHUP (Unix). Bind address and
+   ports stay until a restart. `status_log_secs` logs servers and players
+   (0 = off).
+7. **seihai-rc integration.** Stage 1 of `seihai-rc` is merged, and the RC
+   list (id 5) is already answered here (`tests/shapes.rs`). Still to add: a
+   test in `seihai-rc` that logs in through this listserver.
 8. **First release** (`v0.1.0`): only after Squirrel or Chiaki says go. The
    release workflow already packs the binary, README, licences and the
    sample config for four targets.
@@ -39,4 +41,5 @@ where the code goes.
 - Done (2026-10-31): the encrypted gserver link, so `VERIACC2` is no longer
   in the clear between Seihai's gserver and this listserver.
 - Done: `seihai-core` is on tag `v0.0.5`.
-- A `key-fingerprint` command that prints the key without starting.
+- Done (2026-11-01): `key-fingerprint` prints the public key and fingerprint
+  without starting, and does not create a missing key file.

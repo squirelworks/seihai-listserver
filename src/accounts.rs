@@ -22,6 +22,95 @@ use std::time::SystemTime;
 pub const NO_ACCOUNT: &[u8] = b"Account does not exist.";
 /// Error text for a wrong password.
 pub const BAD_PASSWORD: &[u8] = b"Your password is incorrect.";
+/// Error text when an address is over the failed-login cap. The same text
+/// is used however the guess would have come out, and the password is not checked.
+pub const TOO_MANY: &[u8] = b"Too many tries. Wait and try again.";
+
+/// Which failed guesses share a counter. Client logins and `VERIACC2` are
+/// capped per address, and counted apart so a gserver's account checks do
+/// not use up the cap for players fetching the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GuessKind {
+    /// A client id 1 login.
+    Client,
+    /// A gserver `VERIACC2` check.
+    Veriacc,
+}
+
+struct FailSlot {
+    start: std::time::Instant,
+    fails: u32,
+}
+
+/// Recent failed guesses, keyed by kind and address.
+#[derive(Default)]
+pub struct FailLimit {
+    slots: Mutex<std::collections::HashMap<(GuessKind, std::net::IpAddr), FailSlot>>,
+}
+
+impl FailLimit {
+    /// `true` when `peer` has already used its guesses for this window.
+    /// A limit or window of zero, or an unknown address, is never blocked.
+    pub fn blocked(
+        &self,
+        kind: GuessKind,
+        peer: Option<std::net::IpAddr>,
+        limit: u32,
+        window: std::time::Duration,
+    ) -> bool {
+        if limit == 0 || window.is_zero() {
+            return false;
+        }
+        let Some(peer) = peer else {
+            return false;
+        };
+        let now = std::time::Instant::now();
+        let map = self.slots.lock().unwrap_or_else(|e| e.into_inner());
+        matches!(
+            map.get(&(kind, peer)),
+            Some(slot) if now.duration_since(slot.start) < window && slot.fails >= limit
+        )
+    }
+
+    /// Count one failed guess. Does nothing when the cap is off.
+    pub fn record(
+        &self,
+        kind: GuessKind,
+        peer: Option<std::net::IpAddr>,
+        limit: u32,
+        window: std::time::Duration,
+    ) {
+        if limit == 0 || window.is_zero() {
+            return;
+        }
+        let Some(peer) = peer else {
+            return;
+        };
+        let now = std::time::Instant::now();
+        let mut map = self.slots.lock().unwrap_or_else(|e| e.into_inner());
+        if map.len() > 4096 {
+            map.retain(|_, slot| now.duration_since(slot.start) < window);
+        }
+        use std::collections::hash_map::Entry;
+        match map.entry((kind, peer)) {
+            Entry::Occupied(mut entry) => {
+                let slot = entry.get_mut();
+                if now.duration_since(slot.start) >= window {
+                    slot.start = now;
+                    slot.fails = 1;
+                } else {
+                    slot.fails = slot.fails.saturating_add(1);
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(FailSlot {
+                    start: now,
+                    fails: 1,
+                });
+            }
+        }
+    }
+}
 
 /// The account check.
 pub enum Accounts {
@@ -251,6 +340,39 @@ mod tests {
         assert_eq!(acc.check(b"a", b"one"), Some(BAD_PASSWORD));
         assert_eq!(acc.check(b"b", b"three"), None);
         assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 2);
+    }
+
+    #[test]
+    fn failure_cap_is_per_kind_and_the_window_expires() {
+        use std::net::IpAddr;
+        use std::time::Duration;
+
+        let cap = FailLimit::default();
+        let ip = Some(IpAddr::from([127, 0, 0, 1]));
+        let long = Duration::from_secs(60);
+        assert!(!cap.blocked(GuessKind::Client, ip, 2, long));
+        cap.record(GuessKind::Client, ip, 2, long);
+        assert!(
+            !cap.blocked(GuessKind::Client, ip, 2, long),
+            "the guess that fills the cap is still checked"
+        );
+        cap.record(GuessKind::Client, ip, 2, long);
+        assert!(cap.blocked(GuessKind::Client, ip, 2, long));
+        assert!(
+            !cap.blocked(GuessKind::Veriacc, ip, 2, long),
+            "VERIACC2 has its own count"
+        );
+        assert!(!cap.blocked(GuessKind::Client, None, 2, long));
+        assert!(!cap.blocked(GuessKind::Client, ip, 0, long));
+
+        let short = Duration::from_millis(40);
+        cap.record(GuessKind::Veriacc, ip, 1, short);
+        assert!(cap.blocked(GuessKind::Veriacc, ip, 1, short));
+        std::thread::sleep(Duration::from_millis(80));
+        assert!(
+            !cap.blocked(GuessKind::Veriacc, ip, 1, short),
+            "an expired window is not a block"
+        );
     }
 
     #[test]

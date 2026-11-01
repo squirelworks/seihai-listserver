@@ -72,7 +72,27 @@ impl Servers {
 
     /// Number of listed gservers.
     pub fn listed(&self) -> usize {
-        self.lock().values().filter(|e| e.name.is_some()).count()
+        self.counts().0
+    }
+
+    /// Listed gservers, and the players on them.
+    pub fn counts(&self) -> (usize, usize) {
+        let entries = self.lock();
+        let mut servers = 0;
+        let mut players = 0;
+        for e in entries.values() {
+            if e.name.is_some() {
+                servers += 1;
+                players += e.players.len();
+            }
+        }
+        (servers, players)
+    }
+
+    /// One log line: how many servers and players are listed.
+    pub fn status_line(&self) -> String {
+        let (servers, players) = self.counts();
+        format!("status: {servers} server(s), {players} player(s)")
     }
 
     /// The id 0 server list message, with or without HQ tags.
@@ -180,5 +200,43 @@ mod tests {
             &[s.list_message(false), b"\n".to_vec()].concat(),
         );
         assert_eq!(plain.servers[0].kind, "");
+    }
+
+    #[test]
+    fn status_line_counts_named_servers_and_their_players() {
+        let s = Servers::default();
+        s.insert(1);
+        s.insert(2);
+        s.update(2, |e| {
+            e.name = Some(b"World".to_vec());
+            e.players.insert(1);
+            e.players.insert(2);
+        });
+        assert_eq!(s.counts(), (1, 2));
+        assert_eq!(s.status_line(), "status: 1 server(s), 2 player(s)");
+    }
+
+    /// HQ level 0 stays on every list, tagged `U ` only when the list is
+    /// tagged. Whether only the RC list should see it is still open
+    /// (`docs/NEXT.md`).
+    #[test]
+    fn hq_level_zero_is_listed_for_every_shape() {
+        let s = Servers::default();
+        s.insert(1);
+        s.update(1, |e| {
+            e.name = Some(b"Quiet".to_vec());
+            e.hq_level = 0;
+        });
+        let tagged = seihai_core::protocol::parse_list_reply(
+            &[s.list_message(true), b"\n".to_vec()].concat(),
+        );
+        assert_eq!(tagged.servers.len(), 1);
+        assert_eq!(tagged.servers[0].kind, "U");
+        assert_eq!(tagged.servers[0].name, "Quiet");
+        let plain = seihai_core::protocol::parse_list_reply(
+            &[s.list_message(false), b"\n".to_vec()].concat(),
+        );
+        assert_eq!(plain.servers[0].kind, "");
+        assert_eq!(plain.servers[0].name, "Quiet");
     }
 }
