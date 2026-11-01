@@ -31,6 +31,13 @@ logged), `SENDTEXT` (31). A server's entry is dropped when its link closes.
 HQ level to list tag: 0 hidden `U ` (RC list only; public lists omit it),
 1 bronze `H `, 2 classic (none), 3 gold `P `, 4 G3D `3 `.
 
+The HQ level **4 / `3 ` tag is Torque-era** (3.x–5.x servers whose listed
+name starts with `3 `, UDP on listed port + 1). It is **not** the February
+2000 Graal3D side project (`GR3DV002`), which never talks to a listserver.
+Seihai tracks that host as G3D-9 in `documentation/plannedmilestones.md`;
+this listserver needs no work for that era. Torque listing / connect stays
+held with Ato Stage 4 until a capture exists.
+
 Accounts: open by default; with an accounts file only listed accounts get in.
 
 ## Port plan
