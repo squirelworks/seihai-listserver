@@ -59,9 +59,9 @@ Checked on loopback in a container:
   (open mode, and with an accounts file and `--bad-login`): all checks pass.
 
 Still to do for step 5: real clients under Wine, and the fork and the Rust
-gserver registering. Not in the Python version either, left for later: speaking first to a silent 1.41 (shape S),
-and a check on which gservers may register (any link to the gserver port can
-register today; keep `bind = "127.0.0.1"` until then).
+gserver registering. Not in the Python version either, left for later:
+speaking first to a silent 1.41 (shape S). Which gservers may register is
+the `gservers` allow-list (empty keeps the open behaviour).
 
 ## Secure login (2026-10-31)
 

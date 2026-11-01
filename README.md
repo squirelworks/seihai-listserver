@@ -58,10 +58,16 @@ accounts = "accounts.txt"
 ```
 
 Any program that can reach `gserver_port` can register a server on the list
-and ask whether an account and password are valid (`VERIACC2`). Until the
-listserver can limit which gservers may register, keep that port closed to
-the outside: allow it only from your gservers' addresses in the firewall, or
-run the gservers on the same machine.
+and ask whether an account and password are valid (`VERIACC2`) unless
+`gservers` is set. With a list, links from other addresses are dropped, and
+a server is listed only after it sends `SERVERHQPASS` with that address's
+`hq_password` (the raw rest of the line, before `NEWSERVER`). Leave
+`gservers` empty on a lab. On a public host, set it and still open
+`gserver_port` only to those addresses.
+
+```toml
+gservers = [{ ip = "127.0.0.1", hq_password = "change-me" }]
+```
 
 ## Accounts
 

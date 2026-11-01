@@ -12,7 +12,7 @@ What is done and what is next is in `docs/PLAN.md` and `docs/NEXT.md`.
 | `src/lib.rs` | Module list; re-exports `Config`, `start`, `Running`. |
 | `src/config.rs` | `Config` (TOML, `serde(default, deny_unknown_fields)`), checks, `SAMPLE` (the shipped `seihai-listserver.sample.toml`, kept equal to the defaults by a test). |
 | `src/server.rs` | Binds the gserver port and every client port, then one accept thread per port and one thread per link. `Shared` holds the config, accounts and server table. Caps open links at `max_connections`. |
-| `src/gserver.rs` | One gserver link: the uncompressed `REGISTERV3` line, then zlib frames of `SVO_*` messages; replies only to `VERIACC2`. Removes the entry when the link ends. |
+| `src/gserver.rs` | One gserver link: the uncompressed `REGISTERV3` line, then zlib frames of `SVO_*` messages; replies only to `VERIACC2`. Removes the entry when the link ends. When `gservers` is set, other addresses are dropped and `NEWSERVER` waits for a matching `SERVERHQPASS`. |
 | `src/client.rs` | One client link. `Coding` is the link's framing: `Plain` (zlib), `Gen4` (bz2 + XOR), `Gen5` (compression byte + XOR). It starts `Plain`; id 4 switches to `Gen4`, id 5 or 7 to `Gen5`. Id 7 with `SEI00001` goes to `secure_login`: S1 out and the sealed id 1 in, both plain, then `Gen5` from the seed. |
 | `src/state.rs` | `Servers` (the gserver table, in connect order, behind one mutex), the id 0 list and id 2 status builders, HQ tags. |
 | `src/accounts.rs` | `Accounts::Open` or a file of argon2id hashes, read again when its mtime changes; `add_account`. |
@@ -47,6 +47,7 @@ client --login frame--> client.rs --account--> accounts.rs
   (2.17.1 asks on the third) but the shapes do not clash, so every port
   answers every shape.
 - **`gserver_ip = "peer"` by default.** Safe on a lab; see the README for hosting.
+- **`gservers` empty by default.** Any link may register, as before. A non-empty list is an address check plus the HQ password, both before the server is listed.
 
 ## Adding a message
 

@@ -95,12 +95,20 @@ struct Lab {
 
 impl Lab {
     fn start(accounts: &[(&str, &[u8])]) -> Self {
+        Self::start_gservers(accounts, Vec::new())
+    }
+
+    fn start_gservers(
+        accounts: &[(&str, &[u8])],
+        gservers: Vec<seihai_listserver::config::GserverAllow>,
+    ) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let mut cfg = Config {
             gserver_port: 0,
             client_ports: vec![0, 0, 0],
             site_url: "http://127.0.0.1/site".into(),
             secure_login_key: dir.path().join("seihai-login.key"),
+            gservers,
             ..Config::default()
         };
         if !accounts.is_empty() {
@@ -431,4 +439,130 @@ fn garbage_does_not_take_the_listserver_down() {
         vec![0, 2],
         "still answering"
     );
+}
+
+fn allow(ip: &str, hq_password: &str) -> seihai_listserver::config::GserverAllow {
+    seihai_listserver::config::GserverAllow {
+        ip: ip.into(),
+        hq_password: hq_password.into(),
+    }
+}
+
+fn register_line(g: &mut TcpStream) {
+    g.write_all(&[&[gchar(30)][..], b"lab-test\n"].concat())
+        .unwrap();
+}
+
+fn send_lines(g: &mut TcpStream, msgs: &[Vec<u8>]) {
+    let body: Vec<u8> = msgs.iter().flat_map(|m| [&m[..], b"\n"].concat()).collect();
+    g.write_all(&frame(&zlib_compress(&body).unwrap())).unwrap();
+}
+
+fn hq_line(password: &[u8]) -> Vec<u8> {
+    let mut m = vec![gchar(23)];
+    m.extend_from_slice(password);
+    m
+}
+
+fn newserver_line() -> Vec<u8> {
+    let fields: [&[u8]; 8] = [
+        b"TestWorld",
+        b"A test server",
+        b"English",
+        b"3.0.9",
+        b"http://x/",
+        b"AUTO",
+        b"14802",
+        b"",
+    ];
+    [
+        vec![gchar(22)],
+        fields.iter().flat_map(|f| gstr(f)).collect(),
+    ]
+    .concat()
+}
+
+fn wait_listed(lab: &Lab, n: usize) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while lab.run.shared.servers.listed() != n {
+        assert!(
+            Instant::now() < deadline,
+            "listed count stayed {}, wanted {n}",
+            lab.run.shared.servers.listed()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn allow_list_lists_a_server_only_after_the_hq_password() {
+    let lab = Lab::start_gservers(&[], vec![allow("127.0.0.1", "lab-hq")]);
+    let mut g = TcpStream::connect(lab.run.gserver_addr).unwrap();
+    register_line(&mut g);
+    send_lines(&mut g, &[newserver_line()]);
+    let (frames, closed) = read_frames(&mut g, Duration::from_millis(300));
+    assert!(frames.is_empty() && !closed);
+    assert_eq!(
+        lab.run.shared.servers.listed(),
+        0,
+        "NEWSERVER before SERVERHQPASS is not listed"
+    );
+
+    send_lines(
+        &mut g,
+        &[
+            hq_line(b"lab-hq"),
+            newserver_line(),
+            vec![gchar(24), gchar(3)],
+        ],
+    );
+    wait_listed(&lab, 1);
+    let got = shape_plain(lab.client(0), false);
+    assert_eq!(parse_list(&got[0])[0][0], b"TestWorld");
+    assert_eq!(parse_list(&got[0])[0][6], b"127.0.0.1");
+
+    // A later SERVERHQPASS that does not match closes the link and drops the entry.
+    send_lines(&mut g, &[hq_line(b"nope")]);
+    let (frames, closed) = read_frames(&mut g, WAIT);
+    assert!(frames.is_empty() && closed);
+    wait_listed(&lab, 0);
+}
+
+#[test]
+fn allow_list_drops_other_addresses_and_a_wrong_hq_password() {
+    // ::1 is loopback, and this link comes from 127.0.0.1, so it is not allowed.
+    let other = Lab::start_gservers(&[], vec![allow("::1", "lab-hq")]);
+    let mut g = TcpStream::connect(other.run.gserver_addr).unwrap();
+    let _ = g.write_all(&[&[gchar(30)][..], b"nope\n"].concat());
+    g.set_read_timeout(Some(WAIT)).unwrap();
+    let mut buf = [0u8; 8];
+    match g.read(&mut buf) {
+        Ok(0) => {}
+        Err(e)
+            if matches!(
+                e.kind(),
+                ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted | ErrorKind::BrokenPipe
+            ) => {}
+        other => panic!("expected the other address to be dropped, got {other:?}"),
+    }
+    assert_eq!(other.run.shared.servers.listed(), 0);
+
+    let lab = Lab::start_gservers(&[], vec![allow("127.0.0.1", "lab-hq")]);
+    let mut g = TcpStream::connect(lab.run.gserver_addr).unwrap();
+    register_line(&mut g);
+    let veri = [
+        vec![gchar(17)],
+        gstr(b"acct"),
+        gstr(b"pw"),
+        vec![gchar(0), gchar(2), gchar(5)],
+    ]
+    .concat();
+    send_lines(&mut g, &[hq_line(b"wrong"), newserver_line(), veri]);
+    let (frames, closed) = read_frames(&mut g, WAIT);
+    assert!(closed, "a wrong hq password closes the link");
+    assert!(
+        frames.is_empty(),
+        "no VERIACC2 answer when the hq password does not match: {frames:?}"
+    );
+    assert_eq!(lab.run.shared.servers.listed(), 0);
 }
