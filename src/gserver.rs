@@ -16,6 +16,7 @@
 //! `NEWSERVER` (and account checks) are ignored until `SERVERHQPASS`
 //! matches that address's password. An empty list keeps the open behaviour.
 
+use crate::accounts::GuessKind;
 use crate::config::Config;
 use crate::server::Shared;
 use crate::wire::{self, gchar, put_gstr, show, Fields};
@@ -50,7 +51,7 @@ const MAX_REGISTER: u64 = 1024;
 pub fn serve(stream: TcpStream, id: u64, shared: &Shared) {
     let peer_ip = stream.peer_addr().ok().map(|a| a.ip());
     let peer = peer_ip.map(|ip| ip.to_string()).unwrap_or_default();
-    let Some(auth) = auth_for(&shared.config, peer_ip) else {
+    let Some(auth) = auth_for(&shared.config(), peer_ip) else {
         log!("gserver {id} refused: {peer} is not in the gserver allow-list");
         return;
     };
@@ -105,7 +106,7 @@ fn first_line<R: BufRead>(r: &mut R) -> io::Result<Vec<u8>> {
 }
 
 fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared, mut auth: Auth) -> io::Result<()> {
-    stream.set_read_timeout(Some(shared.config.gserver_timeout()))?;
+    stream.set_read_timeout(Some(shared.config().gserver_timeout()))?;
     let writer = stream.try_clone()?;
     let mut link = Duplex {
         reader: BufReader::new(stream),
@@ -113,17 +114,13 @@ fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared, mut auth: Auth) 
     };
     let line = first_line(&mut link.reader)?;
     if !line.starts_with(seclogin::TOKEN.as_bytes()) {
-        if shared.config.require_secure_gserver_link {
+        if shared.config().require_secure_gserver_link {
             log!("gserver {id} plain link refused (require_secure_gserver_link)");
             return Ok(());
         }
         return session(&mut BufReader::new(link), line, id, peer, shared, &mut auth);
     }
     // The encrypted link: C1 here, S1 back, then records both ways.
-    let Some(identity) = shared.identity.as_ref() else {
-        log!("gserver {id} encrypted link refused: secure_login_key is empty");
-        return Ok(());
-    };
     let hello = match ClientHello::parse(&line, 0) {
         Some(Ok(h)) if h.inner == *seclogin::LINK_TOKEN.as_bytes() => h,
         _ => {
@@ -131,9 +128,16 @@ fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared, mut auth: Auth) 
             return Ok(());
         }
     };
-    let (mut s1, opener) = hello
-        .respond(identity)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    let (mut s1, opener) = {
+        let guard = shared.identity();
+        let Some(identity) = guard.as_ref() else {
+            log!("gserver {id} encrypted link refused: secure_login_key is empty");
+            return Ok(());
+        };
+        hello
+            .respond(identity)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
+    };
     s1.push(b'\n');
     link.write_all(&s1)?;
     link.flush()?;
@@ -302,7 +306,7 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) ->
             > = f.try_into() else {
                 return Step::Quiet;
             };
-            let ip = match shared.config.gserver_ip {
+            let ip = match shared.config().gserver_ip {
                 crate::config::GserverIp::Sent
                     if !sent_ip.is_empty() && !sent_ip.eq_ignore_ascii_case(b"AUTO") =>
                 {
@@ -384,7 +388,7 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) ->
                 .gshort()
                 .map(|n| format!(", identity {n} bytes"))
                 .unwrap_or_default();
-            let err = shared.accounts.check(account, password);
+            let err = shared.check_login(GuessKind::Veriacc, peer.parse().ok(), account, password);
             log!(
                 "gserver {id} veriacc2 {} type {}{identity}: {}",
                 show(account),

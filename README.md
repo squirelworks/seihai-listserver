@@ -23,7 +23,17 @@ to-do list is in [docs/NEXT.md](docs/NEXT.md).
 seihai-listserver sample-config > seihai-listserver.toml   # optional, edit to taste
 seihai-listserver                                           # reads ./seihai-listserver.toml if present
 seihai-listserver --config path/to/listserver.toml
+seihai-listserver key-fingerprint seihai-login.key
 ```
+
+`key-fingerprint` prints the secure-login public key and its fingerprint and
+exits. It does not start the listserver and does not create a missing key.
+`key-fingerprint --config seihai-listserver.toml` uses that file's
+`secure_login_key`. Editing `seihai-listserver.toml` while the listserver is
+running reloads it (on Unix, `SIGHUP` does too). The bind address and the
+ports stay as they were until a restart. Every `status_log_secs` the log
+gets a line with how many servers and players are listed (`0` turns that
+off).
 
 With no config it listens on `127.0.0.1`: gservers register on 14900 and
 clients ask for the list on 14921, 14922 and 14923 (every port answers every
@@ -49,7 +59,11 @@ same machine can reach it. To serve clients and gservers on other machines:
    `gserver_ip = "sent"` and set the gserver's own server IP to the address
    players should use (`<public-host>`).
 4. Use an accounts file (see below) unless the list is meant to be open to
-   every account and password.
+   every account and password. `login_fail_limit` (default 30 per
+   `login_fail_window_secs`, default 60) caps failed client logins and failed
+   `VERIACC2` checks from one address. The two are counted apart. Set either
+   to 0 for no cap. For real 1.41 rev 1, set `silent_list_after_ms` (for
+   example 500); 0 leaves the listserver quiet until the client speaks.
 
 ```toml
 bind = "0.0.0.0"
@@ -88,6 +102,7 @@ skipped with a warning; add those accounts again with `add-account`.
 
 | Client | Sends | Gets |
 |---|---|---|
+| 1.41 rev 1 (shape S) | nothing, when `silent_list_after_ms` is set | the shape A reply |
 | 2.00, 2.05 (shape A) | id 0 list name | id 0 list, id 2 status (one zlib frame) |
 | 2.17 (shape B) | id 0 + id 1 account in one frame | the same, once |
 | 2.19 to 2.21 (gen 4) | id 4 key + token, then id 1 | id 0 + id 2 in one bz2, partly XORed frame |
@@ -141,8 +156,10 @@ cargo test
 ```
 
 `cargo test` starts the listserver on free loopback ports and runs the lab
-shape tests (`tests/shapes.rs`) and Seihai's list client for 2.05, 2.17,
-2.22, 2.31 and 3.04 (`tests/seihai_client.rs`).
+shape tests (`tests/shapes.rs`), the silent-list, login-cap and reload tests
+(`tests/rest.rs`), the `key-fingerprint` command (`tests/key_fingerprint.rs`)
+and Seihai's list client for 2.05, 2.17, 2.22, 2.31 and 3.04
+(`tests/seihai_client.rs`).
 
 Releases for Linux, Windows and macOS are built by GitHub Actions on each `v*` tag.
 

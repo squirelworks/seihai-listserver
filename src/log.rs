@@ -15,6 +15,11 @@ pub fn open(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Stop appending the log to a file. Standard error is unchanged.
+pub fn close() {
+    *FILE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
 /// Write one log line, prefixed with the UTC time.
 pub fn line(msg: &str) {
     let secs = SystemTime::now()

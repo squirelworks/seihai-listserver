@@ -59,9 +59,9 @@ Checked on loopback in a container:
   (open mode, and with an accounts file and `--bad-login`): all checks pass.
 
 Still to do for step 5: real clients under Wine, and the fork and the Rust
-gserver registering. Not in the Python version either, left for later:
-speaking first to a silent 1.41 (shape S). Which gservers may register is
-the `gservers` allow-list (empty keeps the open behaviour).
+gserver registering. Speaking first to a silent 1.41 is
+`silent_list_after_ms` (0 is off). Which gservers may register is the
+`gservers` allow-list (empty keeps the open behaviour).
 
 ## Secure login (2026-10-31)
 
@@ -74,4 +74,4 @@ Next:
 - [x] `seihai-core` is on tag `v0.0.5`.
 - [ ] The RC list (id 5) through the same handshake, once `seihai-rc` uses it.
 - [x] The gserver link (`VERIACC2`, 17) is encrypted (2026-10-31).
-- [ ] A `key-fingerprint` command that prints the key without starting.
+- [x] A `key-fingerprint` command that prints the key without starting.

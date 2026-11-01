@@ -46,6 +46,22 @@ max_connections = 256
 client_timeout_secs = 30
 gserver_timeout_secs = 300
 
+# Real 1.41 rev 1 connects and waits for the list. After this many
+# milliseconds with no byte, send the shape A reply (id 0 list, id 2
+# status). 0: off. A client that speaks first is never answered early.
+silent_list_after_ms = 0
+
+# Failed client logins and failed VERIACC2 checks from one address, counted
+# apart, inside login_fail_window_secs. The next guess is refused without
+# checking the password. 0 on either setting: no cap.
+login_fail_limit = 30
+login_fail_window_secs = 60
+
+# Log how many servers and players are listed, every this many seconds.
+# 0: off. The config file is read again when it changes. On Unix, SIGHUP
+# reloads it too. The bind address and ports stay until a restart.
+status_log_secs = 300
+
 # The Seihai secure login (version token SEI00001): Seihai clients started
 # with --secure-login send the account and password encrypted. This is the
 # file with the listserver's own key; it is made on first start, and the

@@ -72,6 +72,38 @@ pub struct Config {
     /// listed only after `SERVERHQPASS` matches that address's
     /// `hq_password`. Empty: any link may register.
     pub gservers: Vec<GserverAllow>,
+    /// How long to wait for a client's first frame. Real 1.41 rev 1 connects
+    /// and waits, so when this is set and nothing arrives, the listserver
+    /// sends the shape A reply (id 0 list, id 2 status). 0: off.
+    #[serde(default = "default_silent_list_after_ms")]
+    pub silent_list_after_ms: u64,
+    /// Failed client logins, and failed `VERIACC2` checks, allowed from one
+    /// address in [`Self::login_fail_window_secs`]. The two are counted
+    /// apart. Further guesses are refused without checking the password. 0: no cap.
+    #[serde(default = "default_login_fail_limit")]
+    pub login_fail_limit: u32,
+    /// Seconds one address's failure count covers. 0: no cap.
+    #[serde(default = "default_login_fail_window_secs")]
+    pub login_fail_window_secs: u64,
+    /// How often to log how many servers and players are listed. 0: off.
+    #[serde(default = "default_status_log_secs")]
+    pub status_log_secs: u64,
+}
+
+fn default_silent_list_after_ms() -> u64 {
+    0
+}
+
+fn default_login_fail_limit() -> u32 {
+    30
+}
+
+fn default_login_fail_window_secs() -> u64 {
+    60
+}
+
+fn default_status_log_secs() -> u64 {
+    300
 }
 
 impl Default for Config {
@@ -94,6 +126,10 @@ impl Default for Config {
             require_secure_login: false,
             require_secure_gserver_link: false,
             gservers: Vec::new(),
+            silent_list_after_ms: default_silent_list_after_ms(),
+            login_fail_limit: default_login_fail_limit(),
+            login_fail_window_secs: default_login_fail_window_secs(),
+            status_log_secs: default_status_log_secs(),
         }
     }
 }
@@ -161,6 +197,18 @@ impl Config {
     pub fn gserver_timeout(&self) -> Duration {
         Duration::from_secs(self.gserver_timeout_secs.max(1))
     }
+
+    /// How long a new client may stay silent before the shape A list is sent.
+    /// Zero: the listserver does not speak first.
+    pub fn silent_list_after(&self) -> Duration {
+        Duration::from_millis(self.silent_list_after_ms)
+    }
+
+    /// How long one address's failed-login count lasts. Zero, or a
+    /// [`Self::login_fail_limit`] of zero, turns the cap off.
+    pub fn login_fail_window(&self) -> Duration {
+        Duration::from_secs(self.login_fail_window_secs)
+    }
 }
 
 /// The sample config shipped with the release, with every key at its default.
@@ -188,6 +236,10 @@ mod tests {
         assert_eq!(s.require_secure_login, d.require_secure_login);
         assert_eq!(s.require_secure_gserver_link, d.require_secure_gserver_link);
         assert!(s.gservers.is_empty());
+        assert_eq!(s.silent_list_after_ms, d.silent_list_after_ms);
+        assert_eq!(s.login_fail_limit, d.login_fail_limit);
+        assert_eq!(s.login_fail_window_secs, d.login_fail_window_secs);
+        assert_eq!(s.status_log_secs, d.status_log_secs);
     }
 
     #[test]
@@ -213,6 +265,10 @@ mod tests {
         let c = Config::parse("").unwrap();
         assert_eq!(c.bind, "127.0.0.1");
         assert!(c.site_url.is_empty() && c.upgrade_url.is_empty());
+        assert_eq!(c.silent_list_after_ms, 0);
+        assert_eq!(c.login_fail_limit, default_login_fail_limit());
+        assert_eq!(c.login_fail_window_secs, default_login_fail_window_secs());
+        assert_eq!(c.status_log_secs, default_status_log_secs());
     }
 
     #[test]
