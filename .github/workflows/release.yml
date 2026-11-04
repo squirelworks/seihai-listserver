@@ -90,7 +90,9 @@ jobs:
               gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber dist/*
               gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --notes-file "$NOTES"
             else
-              echo "$TAG is already published; leaving it as it is."
+              # Published: only the notes change. The tag, its commit and the files stay.
+              gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --notes-file "$NOTES"
+              echo "$TAG is already published; updated its notes only."
             fi
           else
             gh release create "$TAG" -R "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
