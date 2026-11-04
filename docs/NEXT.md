@@ -6,10 +6,11 @@ where the code goes.
 1. **Lab run with the fork.** Start `seihai-gserver-v2` with its listserver
    set to `127.0.0.1:14900`, then Seihai `--list-only` for 2.05, 2.17, 2.22,
    2.31 on the client ports. Record it in `docs/lab/` (client, commit, result).
-   Seihai half done (2026-11-04): the fork and `seihai-gserver` both
-   register, and all four list them, with and without the allow-list
-   (`docs/lab/2026-11-04-fork-loopback.md`). Still open: real clients under
-   Wine, as in the handoff's `07-lab-testing.md`.
+   Done (2026-11-04): the fork and `seihai-gserver` both register, Seihai's
+   four profiles list them with and without the allow-list, and real 2.05
+   rev2, 2.17.1, 2.22 and 2.31 under Wine list the fork
+   (`docs/lab/2026-11-04-fork-loopback.md`). Still open: the RC list for a
+   hidden server.
 2. ~~**Gserver allow-list** (`config.rs`, `gserver.rs`).~~ Done (2026-11-01):
    `gservers = [{ ip = "127.0.0.1", hq_password = "..." }]`. When it is set,
    links from other addresses are dropped, and `NEWSERVER` is listed only
