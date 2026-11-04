@@ -1,6 +1,6 @@
-# Lab run: the fork and the Rust gserver register, Seihai lists, 2026-11-04
+# Lab run: the fork and the Rust gserver register, Seihai and real clients list, 2026-11-04
 
-NEXT item 1, first half (the Wine half is still open). Where: cloud
+NEXT item 1: Seihai's list client and real clients under Wine. Where: cloud
 container, Linux x86-64, loopback only. Every server was started by hand on
 `127.0.0.1`.
 
@@ -95,6 +95,38 @@ Allow-list off again. `seihai-gserver --world <copy of world/>` with
 - After the fork was stopped, the listserver logged `closed: My Server,
   entry dropped` and 2.31 listed only `Seihai Lab`.
 
+## Run 4: real clients under Wine
+
+Wine 9 (32-bit prefix) and Xvfb, all inside a private network namespace
+whose only interface is loopback. Every IPv4 address there is routed to
+`lo`, and a catch-all DNS stub answers every name with 127.0.0.1, so each
+client's built-in list host lands on this listserver without a hosts entry.
+The listserver binds `0.0.0.0` inside the namespace (loopback only there),
+with the same `accounts.txt`. The fork's lab world runs unchanged.
+
+| Client | Exe | Listserver log | Server list in the client |
+|---|---|---|---|
+| 2.05 rev2 | `Graal.exe` from the 2.05 rev2 archive | port 14921, `list name newmain`, no account (shape A) | `My Server`, 0 players, version and description shown |
+| 2.17.1 | `Graal_2171.exe` | port 14922, `list name newmain`, `account test1` | `My Server`, 0 players |
+| 2.22 | `Graal_222.exe` | port 14922, handshake id 7, gen 5, `account test1` | `My Server`, status `Welcome to Lab listserver, test1.` / `There are 1 server(s) online.` |
+| 2.31 | `Graal_231.exe` | same as 2.22 | same as 2.22 |
+
+All four real clients log in to the list and show the fork. That matches
+Seihai's 2.05, 2.17, 2.22 and 2.31 list profiles in run 1.
+
+Past the list (not part of this item, noted for the fork):
+
+- 2.22 and 2.31 connect to the fork (`New login: test1 [New Client (2.22+)]`)
+  and then stay at "Loading account..." after the server message is closed.
+  The same fork binary with the older lab pack's world gets 2.22 into the
+  game. The difference that matters is that world's
+  `config/servermessage.html`: with it, 2.22 plays; with the fork's own file,
+  or with an image line that points at a placeholder or loopback address, it
+  waits. The cause is not known; Wine's HTML control (no wine-gecko) may play
+  a part. It does not involve the listserver.
+- 2.05 rev2 connects and stays on the loading screen, which is the known
+  pre-2.1 wait for SETACTIVELEVEL.
+
 ## Tests
 
 `cargo test` on the same commit: 50 passed, 0 failed (lib 21, rest 7,
@@ -102,8 +134,6 @@ secure_gserver_link 4, secure_login 6, seihai_client 1, shapes 11).
 
 ## Not checked
 
-- Real 2.05, 2.17, 2.22 and 2.31 clients under Wine (NEXT item 1, second
-  half; this container has no Wine).
 - The RC list (id 5) showing the hidden HQ level 0 server.
 - Logging in to either gserver from the list, and `VERIACC2` from the Rust
   gserver with `listserver_accounts = true` (no gserver login was made).
