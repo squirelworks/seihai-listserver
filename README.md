@@ -115,9 +115,18 @@ gen 4 and gen 5 lists carry the HQ level tag (`H ` bronze, none for
 classic, `P ` gold, `3 ` G3D). HQ level 0 is hidden: that gserver appears
 only on the RC list (client id 5), tagged `U `, and is left off the other
 lists. A refused login gets id 4 and the link closes. Gservers: `REGISTERV3`, `NEWSERVER`, `SERVERHQPASS`, `SERVERHQLEVEL`,
-`SETPLYR`, `PLYRADD`, `PLYRREM`, `VERIACC2`, `SETIP`, `PING`, `SENDTEXT`. A
-gserver's entry is dropped when its link closes or is silent for
+`SETPLYR`, `PLYRADD`, `PLYRREM`, `VERIACC2`, `SERVERINFO`, `SETIP`, `PING`,
+`SENDTEXT`. A gserver's entry is dropped when its link closes or is silent for
 `gserver_timeout_secs`.
+
+`SERVERINFO` is a server warp: a gserver names another server for one of its
+players, and the listserver answers with that server's name, address and port
+(`0,<name>,<host>,<port>`; the name is matched ignoring case, hidden servers
+included). The gserver passes it to the client as `PLO_SERVERWARP` (178), and
+the client reconnects there. A v4 or later client that logs in through its
+built-in login server stays in Login mode, with no players drawn, until it gets
+178, so this is how a lab login server hands such clients to the lab world. An
+unknown name gets no answer.
 
 ## Secure login (SEI00001)
 

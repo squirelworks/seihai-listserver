@@ -3,7 +3,8 @@
 //!
 //! A gserver first sends `SVO_REGISTERV3` as one uncompressed line, then
 //! zlib frames (`u16be` length + zlib body of lines). The listserver
-//! answers only `VERIACC2`, with `SVI_VERIACC2`. The entry is dropped when
+//! answers `VERIACC2` with `SVI_VERIACC2`, and `SERVERINFO` (a server
+//! warp request for one player) with `SVI_SERVERINFO`. The entry is dropped when
 //! the link closes or stays silent past `gserver_timeout_secs`.
 //!
 //! A Seihai gserver may instead open with the encrypted link (Seihai's
@@ -36,6 +37,7 @@ pub mod svo {
     pub const NEWSERVER: usize = 22;
     pub const SERVERHQPASS: usize = 23;
     pub const SERVERHQLEVEL: usize = 24;
+    pub const SERVERINFO: usize = 25;
     pub const REGISTERV3: usize = 30;
     pub const SENDTEXT: usize = 31;
 }
@@ -43,6 +45,7 @@ pub mod svo {
 /// Listserver to gserver ids.
 pub mod svi {
     pub const VERIACC2: usize = 11;
+    pub const SERVERINFO: usize = 18;
 }
 
 /// The longest `REGISTERV3` line taken.
@@ -403,6 +406,27 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) ->
             out.push(b'\n');
             Step::Reply(out)
         }
+        svo::SERVERINFO => {
+            let Some(player) = p.bytes(2) else {
+                return Step::Quiet;
+            };
+            let wanted = p.rest();
+            let Some((name, ip, port)) = shared.servers.warp_target(wanted) else {
+                log!("gserver {id} serverinfo {}: no such server", show(wanted));
+                return Step::Quiet;
+            };
+            log!(
+                "gserver {id} serverinfo {}: {} {}",
+                show(&name),
+                show(&ip),
+                show(&port)
+            );
+            let mut out = vec![gchar(svi::SERVERINFO)];
+            out.extend_from_slice(player);
+            out.extend_from_slice(&warp_text(&name, &ip, &port));
+            out.push(b'\n');
+            Step::Reply(out)
+        }
         // The password is the raw rest of the line, not a GSTRING. Gservers
         // send it before NEWSERVER; a later repeat must still match.
         svo::SERVERHQPASS => {
@@ -433,6 +457,32 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) ->
     }
 }
 
+/// The `SVI_SERVERINFO` text, which the gserver hands its client as
+/// `PLO_SERVERWARP` (178) unchanged: comma text with field 0 unused, then
+/// the server name, host and port (`protocol/packet-layouts.md` in
+/// Graal_analysis). A name with a comma or a quote is put in quotes, with
+/// quotes doubled, so the client still sees four fields.
+fn warp_text(name: &[u8], ip: &[u8], port: &[u8]) -> Vec<u8> {
+    let mut out = b"0,".to_vec();
+    if name.iter().any(|&b| b == b',' || b == b'"') {
+        out.push(b'"');
+        for &b in name {
+            if b == b'"' {
+                out.push(b'"');
+            }
+            out.push(b);
+        }
+        out.push(b'"');
+    } else {
+        out.extend_from_slice(name);
+    }
+    out.push(b',');
+    out.extend_from_slice(ip);
+    out.push(b',');
+    out.extend_from_slice(port);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,6 +490,18 @@ mod tests {
 
     fn cfg(text: &str) -> Config {
         Config::parse(text).unwrap()
+    }
+
+    #[test]
+    fn warp_text_has_four_fields_and_quotes_awkward_names() {
+        assert_eq!(
+            warp_text(b"Lab Server", b"127.0.0.1", b"14805"),
+            b"0,Lab Server,127.0.0.1,14805"
+        );
+        assert_eq!(
+            warp_text(b"A, \"B\"", b"10.0.2.100", b"1"),
+            b"0,\"A, \"\"B\"\"\",10.0.2.100,1"
+        );
     }
 
     #[test]

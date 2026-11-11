@@ -26,7 +26,8 @@ Client side, by login shape:
 Gserver side: `SVO_REGISTERV3` (one uncompressed line), then zlib frames:
 `NEWSERVER` (22), `SERVERHQPASS` (23), `SERVERHQLEVEL` (24), `SETPLYR` (7),
 `PLYRADD` (14), `PLYRREM` (15), `VERIACC2` (17, answered with `SVI_VERIACC2` 11:
-SUCCESS or the account error), `SETIP` (5, beta4's 60 s keep-alive), `PING` (16,
+SUCCESS or the account error), `SERVERINFO` (25, answered with `SVI_SERVERINFO` 18:
+the player id and `0,<name>,<host>,<port>` for a server warp), `SETIP` (5, beta4's 60 s keep-alive), `PING` (16,
 logged), `SENDTEXT` (31). A server's entry is dropped when its link closes.
 HQ level to list tag: 0 hidden `U ` (RC list only; public lists omit it),
 1 bronze `H `, 2 classic (none), 3 gold `P `, 4 G3D `3 `.

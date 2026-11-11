@@ -118,6 +118,20 @@ impl Servers {
         (servers, players)
     }
 
+    /// The warp target for `SVO_SERVERINFO`: the named gserver whose name
+    /// equals `name`, ignoring ASCII case. Returns its name as registered,
+    /// its address and its port. Hidden gservers (HQ level 0) are included:
+    /// a gserver may send its own players to a server that is not on the
+    /// public list. With several matches the one that connected first wins.
+    pub fn warp_target(&self, name: &[u8]) -> Option<(Vec<u8>, Vec<u8>, Vec<u8>)> {
+        let entries = self.lock();
+        entries.values().find_map(|e| {
+            let n = e.name.as_deref()?;
+            n.eq_ignore_ascii_case(name)
+                .then(|| (n.to_vec(), e.ip.clone(), e.port.clone()))
+        })
+    }
+
     /// One log line: how many servers and players are listed.
     pub fn status_line(&self) -> String {
         let (servers, players) = self.counts();

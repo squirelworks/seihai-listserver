@@ -631,3 +631,27 @@ fn allow_list_drops_other_addresses_and_a_wrong_hq_password() {
     );
     assert_eq!(lab.run.shared.servers.listed(), 0);
 }
+
+/// `SVO_SERVERINFO` (25): a gserver asks where another listed server is so it
+/// can warp one player there. The answer, `SVI_SERVERINFO` (18), echoes the
+/// player id and carries the comma text the gserver passes on as 178.
+#[test]
+fn serverinfo_answers_a_listed_server_and_ignores_an_unknown_one() {
+    let lab = Lab::start(&[]);
+    let mut login = register_open(&lab, b"Login", 1);
+    let _target = register_open(&lab, b"Lab Server", 0);
+    wait_listed(&lab, 2);
+
+    let ask = |name: &[u8]| [&[gchar(25), gchar(0), gchar(7)][..], name].concat();
+    send_lines(&mut login, &[ask(b"lab server"), ask(b"Nowhere")]);
+    let (frames, _) = read_frames(&mut login, WAIT);
+    let replies: Vec<Vec<u8>> = frames
+        .iter()
+        .flat_map(|f| lines(&zlib_decompress(f).unwrap()))
+        .collect();
+    assert_eq!(replies.len(), 1, "one answer, none for an unknown name");
+    assert_eq!(
+        replies[0],
+        [&[gchar(18), gchar(0), gchar(7)][..], b"0,Lab Server,127.0.0.1,14802"].concat()
+    );
+}
