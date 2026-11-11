@@ -61,13 +61,14 @@ accounts are argon2id hashes made with `seihai-listserver add-account`.
 Checked on loopback in a container:
 
 - `cargo test`: the shape tests (`tests/shapes.rs`) and Seihai's list client
-  from seihai-core v0.0.3 for 2.05, 2.17, 2.22, 2.31 and 3.04
+  from seihai-core (now v0.0.5) for 2.05, 2.17, 2.22, 2.31 and 3.04
   (`tests/seihai_client.rs`), right and wrong passwords.
 - `docs/reference/test_listserver.py` run unchanged against the Rust binary
   (open mode, and with an accounts file and `--bad-login`): all checks pass.
 
-Still to do for step 5: real clients under Wine, and the fork and the Rust
-gserver registering. Speaking first to a silent 1.41 is
+Step 5 is done (2026-11-04): the fork and the Rust gserver register, and
+real 2.05 rev 2, 2.17.1, 2.22 and 2.31 under Wine list the fork
+(`docs/lab/2026-11-04-fork-loopback.md`). v0.1.0 was released the same day. Speaking first to a silent 1.41 is
 `silent_list_after_ms` (0 is off). Which gservers may register is the
 `gservers` allow-list (empty keeps the open behaviour).
 

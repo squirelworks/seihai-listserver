@@ -7,12 +7,14 @@ Part of the Seihai server stack:
 [seihai-npcserver](https://github.com/squirelworks/seihai-npcserver) ·
 [seihai-listserver](https://github.com/squirelworks/seihai-listserver) ·
 [seihai-rc](https://github.com/squirelworks/seihai-rc) ·
+[seihai-servertools](https://github.com/squirelworks/seihai-servertools) ·
 [seihai-gserver-v2](https://github.com/squirelworks/seihai-gserver-v2) (GPL fork of GServer-v2, ships first) ·
 client: [seihai](https://github.com/squirelworks/seihai).
 
-**Status: first working version.** A Rust port of the lab listserver v2
+**Status: v0.1.0 released (2026-11-04).** A Rust port of the lab listserver v2
 (`docs/reference/listserver.py`), checked on loopback with its shape tests and
-with Seihai's own list client. The plan is in [docs/PLAN.md](docs/PLAN.md), the
+with Seihai's own list client, and in a lab run with the GPL fork and real
+clients under Wine (`docs/lab/2026-11-04-fork-loopback.md`). The plan is in [docs/PLAN.md](docs/PLAN.md), the
 rules every contributor and coding agent follows are in [AGENTS.md](AGENTS.md),
 the code layout is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the ordered
 to-do list is in [docs/NEXT.md](docs/NEXT.md).
@@ -158,9 +160,10 @@ cargo test
 
 `cargo test` starts the listserver on free loopback ports and runs the lab
 shape tests (`tests/shapes.rs`), the silent-list, login-cap and reload tests
-(`tests/rest.rs`), the `key-fingerprint` command (`tests/key_fingerprint.rs`)
-and Seihai's list client for 2.05, 2.17, 2.22, 2.31 and 3.04
-(`tests/seihai_client.rs`).
+(`tests/rest.rs`), Seihai's list client for 2.05, 2.17, 2.22, 2.31 and 3.04
+(`tests/seihai_client.rs`), the secure login (`tests/secure_login.rs`) and
+the encrypted gserver link (`tests/secure_gserver_link.rs`). The
+`key-fingerprint` command is covered by a library test in `src/server.rs`.
 
 Releases for Linux, Windows and macOS are built by GitHub Actions on each `v*` tag.
 
