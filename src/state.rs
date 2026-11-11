@@ -83,7 +83,6 @@ impl Servers {
         );
     }
 
-    /// Drop a gserver's entry.
     /// The listed name, IP and port of the server called `name`, for a
     /// warp. Ignores ASCII case, includes hidden (HQ level 0) servers, and
     /// the first to connect wins.
@@ -96,6 +95,7 @@ impl Servers {
         })
     }
 
+    /// Drop a gserver's entry.
     pub fn remove(&self, id: u64) -> Option<Entry> {
         self.lock().remove(&id)
     }
