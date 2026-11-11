@@ -37,9 +37,9 @@ where the code goes.
 7. **seihai-rc integration.** Stage 1 of `seihai-rc` is merged, and the RC
    list (id 5) is already answered here (`tests/shapes.rs`). Still to add: a
    test in `seihai-rc` that logs in through this listserver.
-8. **First release** (`v0.1.0`): only after Squirrel or Chiaki says go. The
-   release workflow already packs the binary, README, licences and the
-   sample config for four targets.
+8. ~~**First release** (`v0.1.0`).~~ Done (2026-11-04): published
+   with Linux, Windows and both macOS archives. Notes in
+   `docs/releases/v0.1.0.md`.
 
 ## Secure login follow-ups (2026-10-31)
 
