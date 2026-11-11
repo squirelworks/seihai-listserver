@@ -83,6 +83,18 @@ impl Servers {
         );
     }
 
+    /// The listed name, IP and port of the server called `name`, for a
+    /// warp. Ignores ASCII case, includes hidden (HQ level 0) servers, and
+    /// the first to connect wins.
+    pub fn warp_target(&self, name: &[u8]) -> Option<(Vec<u8>, Vec<u8>, Vec<u8>)> {
+        let entries = self.lock();
+        entries.values().find_map(|e| {
+            let n = e.name.as_deref()?;
+            n.eq_ignore_ascii_case(name)
+                .then(|| (n.to_vec(), e.ip.clone(), e.port.clone()))
+        })
+    }
+
     /// Drop a gserver's entry.
     pub fn remove(&self, id: u64) -> Option<Entry> {
         self.lock().remove(&id)
