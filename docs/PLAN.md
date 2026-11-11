@@ -68,8 +68,8 @@ Checked on loopback in a container:
 
 Step 5 is done (2026-11-04): the fork and the Rust gserver register, and
 real 2.05 rev 2, 2.17.1, 2.22 and 2.31 under Wine list the fork
-(`docs/lab/2026-11-04-fork-loopback.md`). v0.1.0 was released the same day. Speaking first to a silent 1.41 is
-`silent_list_after_ms` (0 is off). Which gservers may register is the
+(`docs/lab/2026-11-04-fork-loopback.md`). v0.1.0 was released the same
+day. Speaking first to a silent 1.41 is `silent_list_after_ms` (0 is off). Which gservers may register is the
 `gservers` allow-list (empty keeps the open behaviour).
 
 ## Secure login (2026-10-31)
@@ -78,9 +78,7 @@ Done: id 7 with `SEI00001` (Seihai `documentation/secure-login.md`) on every
 client port, `secure_login_key` and `require_secure_login` settings, tests in
 `tests/secure_login.rs` with Seihai's own client.
 
-Next:
-
-- [x] `seihai-core` is on tag `v0.0.5`.
-- [ ] The RC list (id 5) through the same handshake, once `seihai-rc` uses it.
-- [x] The gserver link (`VERIACC2`, 17) is encrypted (2026-10-31).
-- [x] A `key-fingerprint` command that prints the key without starting.
+Also done: the encrypted gserver link (`VERIACC2`, 17), `seihai-core` on
+tag `v0.0.5`, and the `key-fingerprint` command. What is still open (the
+RC list over the same handshake) is tracked in `docs/NEXT.md`, the one
+to-do list for this repo.
