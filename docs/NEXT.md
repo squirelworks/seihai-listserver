@@ -57,6 +57,6 @@ where the code goes.
   clear (Squirrel, 2026-10-31).
 - Done (2026-10-31): the encrypted gserver link, so `VERIACC2` is no longer
   in the clear between Seihai's gserver and this listserver.
-- Done: `seihai-core` is on tag `v0.0.5`.
+- Done: `seihai-core` is on tag `v0.0.6` (2026-11-11).
 - Done (2026-11-01): `key-fingerprint` prints the public key and fingerprint
   without starting, and does not create a missing key file.

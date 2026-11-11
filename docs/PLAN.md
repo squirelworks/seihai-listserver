@@ -62,7 +62,7 @@ accounts are argon2id hashes made with `seihai-listserver add-account`.
 Checked on loopback in a container:
 
 - `cargo test`: the shape tests (`tests/shapes.rs`) and Seihai's list client
-  from seihai-core (now v0.0.5) for 2.05, 2.17, 2.22, 2.31 and 3.04
+  from seihai-core (now v0.0.6) for 2.05, 2.17, 2.22, 2.31 and 3.04
   (`tests/seihai_client.rs`), right and wrong passwords.
 - `docs/reference/test_listserver.py` run unchanged against the Rust binary
   (open mode, and with an accounts file and `--bad-login`): all checks pass.
@@ -80,6 +80,6 @@ client port, `secure_login_key` and `require_secure_login` settings, tests in
 `tests/secure_login.rs` with Seihai's own client.
 
 Also done: the encrypted gserver link (`VERIACC2`, 17), `seihai-core` on
-tag `v0.0.5`, and the `key-fingerprint` command. What is still open (the
+tag `v0.0.6`, and the `key-fingerprint` command. What is still open (the
 RC list over the same handshake) is tracked in `docs/NEXT.md`, the one
 to-do list for this repo.
