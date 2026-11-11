@@ -3,14 +3,14 @@
 In order. One branch and pull request each (see `AGENTS.md`). Each item says
 where the code goes.
 
-1. **Lab run with the fork.** Start `seihai-gserver-v2` with its listserver
+1. ~~**Lab run with the fork.**~~ Start `seihai-gserver-v2` with its listserver
    set to `127.0.0.1:14900`, then Seihai `--list-only` for 2.05, 2.17, 2.22,
    2.31 on the client ports. Record it in `docs/lab/` (client, commit, result).
    Done (2026-11-04): the fork and `seihai-gserver` both register, Seihai's
    four profiles list them with and without the allow-list, and real 2.05
    rev2, 2.17.1, 2.22 and 2.31 under Wine list the fork
-   (`docs/lab/2026-11-04-fork-loopback.md`). Still open: the RC list for a
-   hidden server.
+   (`docs/lab/2026-11-04-fork-loopback.md`). The RC list for a hidden
+   server is still open; it is tracked in item 7.
 2. ~~**Gserver allow-list** (`config.rs`, `gserver.rs`).~~ Done (2026-11-01):
    `gservers = [{ ip = "127.0.0.1", hq_password = "..." }]`. When it is set,
    links from other addresses are dropped, and `NEWSERVER` is listed only
@@ -34,16 +34,25 @@ where the code goes.
    file is read again when it changes, and on SIGHUP (Unix). Bind address and
    ports stay until a restart. `status_log_secs` logs servers and players
    (0 = off).
-7. **seihai-rc integration.** Stage 1 of `seihai-rc` is merged, and the RC
-   list (id 5) is already answered here (`tests/shapes.rs`). Still to add: a
-   test in `seihai-rc` that logs in through this listserver.
+7. **seihai-rc integration.** The RC list (id 5) is answered here
+   (`tests/shapes.rs`), and a real 2.22 RC under Wine has used this
+   listserver in seihai-rc's lab runs (seihai-rc
+   `docs/lab/2026-11-04-rc-accounts.md`). Still to do:
+   - a test in `seihai-rc` that logs in through this listserver (its tests
+     use a fake listserver, `tests/fake_servers.rs`);
+   - a lab run where a real RC lists a hidden (HQ level 0) server.
 8. ~~**First release** (`v0.1.0`).~~ Done (2026-11-04): published
    with Linux, Windows and both macOS archives. Notes in
    `docs/releases/v0.1.0.md`.
 
 ## Secure login follow-ups (2026-10-31)
 
-- The RC list (id 5) through the same handshake, once `seihai-rc` speaks it.
+- **The RC list (id 5) through the same handshake** (`client.rs`). Ready to
+  start: seihai-rc has sent it since 2026-11-01 (`servers --secure-login`):
+  id 5, the key byte, `SEI00001`, the RC token and the client's key, no list
+  name; then the sealed id 1. This listserver still answers `SEI00001` only
+  on id 7, so seihai-rc's secure RC list is so far checked only against its
+  own fake listserver (seihai-rc `docs/lab/2026-11-01-secure-rc-list.md`).
 - Seihai only: real clients cannot be changed, so their logins stay in the
   clear (Squirrel, 2026-10-31).
 - Done (2026-10-31): the encrypted gserver link, so `VERIACC2` is no longer

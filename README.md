@@ -1,6 +1,6 @@
 # seihai-listserver
 
-A Graal listserver: gives classic clients (2.00 to 2.31), Seihai and RCs their server list, and lets gservers register and verify accounts.
+A Graal listserver: gives classic clients (1.41 to 3.x), Seihai and RCs their server list, and lets gservers register and verify accounts.
 
 Part of the Seihai server stack:
 [seihai-gserver](https://github.com/squirelworks/seihai-gserver) ·
