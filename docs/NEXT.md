@@ -34,13 +34,11 @@ where the code goes.
    file is read again when it changes, and on SIGHUP (Unix). Bind address and
    ports stay until a restart. `status_log_secs` logs servers and players
    (0 = off).
-7. **seihai-rc integration.** The RC list (id 5) is answered here
-   (`tests/shapes.rs`), and a real 2.22 RC under Wine has used this
-   listserver in seihai-rc's lab runs (seihai-rc
-   `docs/lab/2026-11-04-rc-accounts.md`). Still to do:
-   - a test in `seihai-rc` that logs in through this listserver (its tests
-     use a fake listserver, `tests/fake_servers.rs`);
-   - a lab run where a real RC lists a hidden (HQ level 0) server.
+7. ~~**seihai-rc integration.**~~ Done (2026-11-12). The RC list (id 5) is
+   answered here (`tests/shapes.rs`); seihai-rc logs in through this
+   listserver in `tests/real_listserver.rs` (seihai-rc #35); and a real
+   2.22 RC listed a hidden (HQ level 0) server while real 2.22 and 2.31
+   clients did not see it (`docs/lab/2026-11-12-hidden-server.md`).
 8. ~~**First release** (`v0.1.0`).~~ Done (2026-11-04): published
    with Linux, Windows and both macOS archives. Notes in
    `docs/releases/v0.1.0.md`.
