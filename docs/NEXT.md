@@ -37,10 +37,12 @@ where the code goes.
 7. **seihai-rc integration.** The RC list (id 5) is answered here
    (`tests/shapes.rs`), and a real 2.22 RC under Wine has used this
    listserver in seihai-rc's lab runs (seihai-rc
-   `docs/lab/2026-11-04-rc-accounts.md`). Still to do:
-   - a test in `seihai-rc` that logs in through this listserver (its tests
-     use a fake listserver, `tests/fake_servers.rs`);
-   - a lab run where a real RC lists a hidden (HQ level 0) server.
+   `docs/lab/2026-11-04-rc-accounts.md`). seihai-rc now logs in through
+   this listserver in its own tests (seihai-rc #35, `tests/real_listserver.rs`,
+   at tag `v0.1.0`). Still to do:
+   - a lab run where a real RC lists a hidden (HQ level 0) server (#19);
+   - move seihai-rc's dev-dependency to `v0.1.1` so its secure RC list test
+     can run against this listserver too.
 8. ~~**First release** (`v0.1.0`).~~ Done (2026-11-04): published
    with Linux, Windows and both macOS archives. Notes in
    `docs/releases/v0.1.0.md`.

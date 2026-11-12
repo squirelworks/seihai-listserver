@@ -1,6 +1,6 @@
 [package]
 name = "seihai-listserver"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "A Graal listserver: gives classic clients (1.41 to 3.x), Seihai and RCs their server list, and lets gservers register and verify accounts."
