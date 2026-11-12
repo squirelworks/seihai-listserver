@@ -13,9 +13,10 @@
 //!   is two zlib frames: id 0 list; then id 2 status, id 3 site URL and
 //!   id 5 upgrade URL.
 //!
-//! - id 7 with the token `SEI00001` (the Seihai secure login): the server
-//!   hello in a plain frame, then the sealed id 1 in a plain frame, then the
-//!   gen-5 reply as for id 7. See Seihai's `documentation/secure-login.md`.
+//! - id 7 or id 5 with the token `SEI00001` (the Seihai secure login): the
+//!   server hello in a plain frame, then the sealed id 1 in a plain frame,
+//!   then the gen-5 reply as for id 7 or the RC list (id 5). seihai-rc sends
+//!   id 5 with no list name. See Seihai's `documentation/secure-login.md`.
 //!
 //! The list is tagged with the HQ level for gen 4, gen 5 and the RC list.
 //! HQ level 0 is hidden: only the RC list (id 5) includes it, tagged `U `.
@@ -52,7 +53,7 @@ enum Coding {
     /// bz2 and the partial XOR, no compression byte (2.19 to 2.21).
     Gen4 { cin: Gen5, cout: Gen5 },
     /// Compression byte and the partial XOR (2.22 and later). `rc` is the
-    /// RC list (client id 5); id 7 and the secure login leave it false.
+    /// RC list (client id 5, classic or secure); id 7 leaves it false.
     Gen5 { cin: Gen5, cout: Gen5, rc: bool },
 }
 
@@ -194,10 +195,13 @@ fn run(stream: TcpStream, id: u64, shared: &Shared, peer: Option<IpAddr>) -> io:
                         )?;
                     }
                 }
-                pli::V2ENCRYPTKEYCL if payload.get(1..9).is_some_and(seclogin::is_token) => {
-                    // The Seihai secure login: C1 here, S1 back, then C2
-                    // with id 1's payload sealed. Anything after C1 in its
-                    // frame is ignored.
+                pli::V2ENCRYPTKEYCL | pli::V2SERVERLISTRC
+                    if payload.get(1..9).is_some_and(seclogin::is_token) =>
+                {
+                    // The Seihai secure login (id 7 for players, id 5 for
+                    // seihai-rc's RC list): C1 here, S1 back, then C2 with
+                    // id 1's payload sealed. Anything after C1 in its frame
+                    // is ignored.
                     return secure_login(
                         &mut reader,
                         &mut writer,
@@ -312,8 +316,11 @@ fn refuse(writer: &mut TcpStream, coding: &mut Coding, err: &[u8]) -> io::Result
     Ok(())
 }
 
-/// The Seihai secure login (`SEI00001`) from C1 (`line`, the whole id 7
-/// message) to the list reply. See Seihai's `documentation/secure-login.md`.
+/// The Seihai secure login (`SEI00001`) from C1 (`line`, the whole id 7 or
+/// id 5 message) to the list reply. See Seihai's `documentation/secure-login.md`.
+///
+/// The password check goes through [`answer_account`], so a failed secure
+/// login counts towards the login rate limit like any other.
 fn secure_login<R: Read>(
     reader: &mut R,
     writer: &mut TcpStream,
@@ -333,8 +340,10 @@ fn secure_login<R: Read>(
         None => return bad("no token".into()),
     };
     let key = hello.prefix[1].wrapping_sub(32);
+    let rc = hello.prefix[0].wrapping_sub(32) as usize == pli::V2SERVERLISTRC;
     log!(
-        "client {id} secure login SEI00001, inner token {}, list {}",
+        "client {id} secure login SEI00001 ({}), inner token {}, list {}",
+        if rc { "RC list" } else { "player list" },
         show(&hello.inner),
         show(&hello.suffix)
     );
@@ -362,11 +371,11 @@ fn secure_login<R: Read>(
         Ok(t) => t,
         Err(e) => return bad(e.to_string()),
     };
-    // A Seihai player, not the RC list: hidden servers stay off.
+    // Hidden servers (tagged `U `) only on the RC list.
     *coding = Coding::Gen5 {
         cin: Gen5::new(key),
         cout: Gen5::new(key),
-        rc: false,
+        rc,
     };
     answer_account(writer, coding, id, shared, peer, &tail)?;
     Ok(())

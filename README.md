@@ -139,8 +139,10 @@ ChaCha20-Poly1305). The spec is Seihai's
   (default `seihai-login.key` beside the config) and logs its fingerprint.
   Publish the fingerprint so players can check it; back the file up.
 - `secure_login_key = ""` turns secure logins off.
-- `require_secure_login = true` refuses classic account logins (real
-  Graal clients then cannot get the list).
+- seihai-rc's `servers --secure-login --server-key KEY` gets the RC list
+  (id 5, hidden servers included) the same way.
+- `require_secure_login = true` refuses classic account logins, players'
+  and RCs' alike (real Graal clients and RCs then cannot get the list).
 - Classic logins work exactly as before. The secure login is for Seihai
   only: real Graal clients cannot be changed, so their logins stay in the
   clear.

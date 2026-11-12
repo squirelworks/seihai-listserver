@@ -47,12 +47,9 @@ where the code goes.
 
 ## Secure login follow-ups (2026-10-31)
 
-- **The RC list (id 5) through the same handshake** (`client.rs`). Ready to
-  start: seihai-rc has sent it since 2026-11-01 (`servers --secure-login`):
-  id 5, the key byte, `SEI00001`, the RC token and the client's key, no list
-  name; then the sealed id 1. This listserver still answers `SEI00001` only
-  on id 7, so seihai-rc's secure RC list is so far checked only against its
-  own fake listserver (seihai-rc `docs/lab/2026-11-01-secure-rc-list.md`).
+- Done (2026-11-12): the RC list (id 5) through the same handshake
+  (`client.rs`, issue #18). Checked with seihai-rc itself on loopback:
+  `docs/lab/2026-11-12-secure-rc-list.md`.
 - Seihai only: real clients cannot be changed, so their logins stay in the
   clear (Squirrel, 2026-10-31).
 - Done (2026-10-31): the encrypted gserver link, so `VERIACC2` is no longer
