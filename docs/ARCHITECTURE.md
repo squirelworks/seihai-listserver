@@ -13,7 +13,7 @@ What is done and what is next is in `docs/PLAN.md` and `docs/NEXT.md`.
 | `src/config.rs` | `Config` (TOML, `serde(default, deny_unknown_fields)`), checks, `SAMPLE` (the shipped `seihai-listserver.sample.toml`, kept equal to the defaults by a test). |
 | `src/server.rs` | Binds the gserver port and every client port, then one accept thread per port and one thread per link. `Shared` holds the config, accounts, failure cap and server table. Caps open links at `max_connections`. A housekeeping thread reloads the config file when it changes (and on SIGHUP on Unix) and logs a status line. |
 | `src/gserver.rs` | One gserver link: the uncompressed `REGISTERV3` line, then zlib frames of `SVO_*` messages; replies to `VERIACC2` and `SERVERINFO` (server warp). Removes the entry when the link ends. When `gservers` is set, other addresses are dropped and `NEWSERVER` waits for a matching `SERVERHQPASS`. |
-| `src/client.rs` | One client link. `Coding` is the link's framing: `Plain` (zlib), `Gen4` (bz2 + XOR), `Gen5` (compression byte + XOR). It starts `Plain`; id 4 switches to `Gen4`, id 5 or 7 to `Gen5`. Id 5 is the RC list (`Gen5` with hidden servers). Id 7 with `SEI00001` goes to `secure_login`: S1 out and the sealed id 1 in, both plain, then `Gen5` from the seed, without hidden servers. When `silent_list_after_ms` is set, a link that sends nothing gets the shape A reply. |
+| `src/client.rs` | One client link. `Coding` is the link's framing: `Plain` (zlib), `Gen4` (bz2 + XOR), `Gen5` (compression byte + XOR). It starts `Plain`; id 4 switches to `Gen4`, id 5 or 7 to `Gen5`. Id 5 is the RC list (`Gen5` with hidden servers). Id 7 or id 5 with `SEI00001` goes to `secure_login`: S1 out and the sealed id 1 in, both plain, then `Gen5` from the seed; hidden servers only after id 5 (seihai-rc's secure RC list). When `silent_list_after_ms` is set, a link that sends nothing gets the shape A reply. |
 | `src/state.rs` | `Servers` (the gserver table, in connect order, behind one mutex), the id 0 list and id 2 status builders, HQ tags. HQ level 0 is listed only for the RC list. |
 | `src/accounts.rs` | `Accounts::Open` or a file of argon2id hashes, read again when its mtime changes; `add_account`. `FailLimit` caps failed client logins and failed `VERIACC2` checks per address. |
 | `src/wire.rs` | GCHAR/GSTRING/GSHORT, the `u16be` frame, `show()` for safe log text. |
@@ -62,7 +62,7 @@ client --login frame--> client.rs --account--> accounts.rs
 - Unit tests in each module (`cargo test --lib`).
 - `tests/shapes.rs`: the Python lab tests, on free loopback ports.
 - `tests/seihai_client.rs`: Seihai's list client for 2.05, 2.17, 2.22, 2.31, 3.04.
-- `tests/secure_login.rs`: the Seihai secure login (`SEI00001`): right and wrong password, wrong key, trust on first use, `require_secure_login`, a tampered seal.
+- `tests/secure_login.rs`: the Seihai secure login (`SEI00001`): right and wrong password, wrong key, trust on first use, `require_secure_login`, a tampered seal; the RC list (id 5) over the same handshake, with hidden servers, a wrong password, the classic RC refused under `require_secure_login`, and the rate limit.
 - `tests/rest.rs`: shape S, the login-failure cap, config reload.
 - `key-fingerprint` is covered by a library test: it prints the public key and fingerprint, and a missing file is an error.
 - By hand: `python3 -I docs/reference/test_listserver.py` against a running
