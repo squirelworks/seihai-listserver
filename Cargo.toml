@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 # Protocol, framing, version profiles and scripting shared with the Seihai client.
-seihai-core = { git = "https://github.com/squirelworks/seihai-core", tag = "v0.0.9", default-features = false }
+seihai-core = { git = "https://github.com/squirelworks/seihai-core", tag = "v0.0.11", default-features = false }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 argon2 = { version = "0.5", features = ["std"] }
