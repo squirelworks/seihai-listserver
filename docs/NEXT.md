@@ -55,3 +55,9 @@ where the code goes.
 - Done: `seihai-core` is on tag `v0.0.6` (2026-11-11).
 - Done (2026-11-01): `key-fingerprint` prints the public key and fingerprint
   without starting, and does not create a missing key file.
+
+## Gserver text, profiles, guilds, PMs, buddies (2026-11-13)
+
+Spec: `docs/design/gserver-text-profiles-guilds.md`. Work is filed as
+issues labelled `cursor`, in the order A → B, C → D, E, F → G, H. Nothing
+is implemented yet.
