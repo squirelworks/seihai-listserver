@@ -103,13 +103,20 @@ fn secure_gserver(
         }
     }
     let mut sec = ch.wrap(Both(r, w));
-    let mut len = [0u8; 2];
-    sec.read_exact(&mut len).map_err(|e| e.to_string())?;
-    let mut body = vec![0u8; u16::from_be_bytes(len) as usize];
-    sec.read_exact(&mut body).map_err(|e| e.to_string())?;
+    // Skip player-count pushes (SVI_SENDTEXT, 20) about other gservers.
+    let reply = loop {
+        let mut len = [0u8; 2];
+        sec.read_exact(&mut len).map_err(|e| e.to_string())?;
+        let mut body = vec![0u8; u16::from_be_bytes(len) as usize];
+        sec.read_exact(&mut body).map_err(|e| e.to_string())?;
+        let lines = zlib_decompress(&body).unwrap();
+        if lines.first() != Some(&(20 + 32)) {
+            break lines;
+        }
+    };
     // Keep the link open while the caller looks at the list.
     std::mem::forget(sec);
-    Ok(zlib_decompress(&body).unwrap())
+    Ok(reply)
 }
 
 fn key(dir: &Path) -> [u8; 32] {

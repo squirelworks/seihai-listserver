@@ -1,16 +1,23 @@
 //! Listening sockets and one thread per link.
 
 use crate::accounts::{Accounts, FailLimit, GuessKind};
+use crate::buddies::Buddies;
 use crate::config::Config;
+use crate::links::Links;
 use crate::machines::Machines;
+use crate::profiles::Profiles;
 use crate::state::Servers;
 use seihai_core::protocol::seclogin::{self, ServerIdentity};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime};
+
+/// Channel names each player (gserver link id, player id) is in.
+pub type Channels = BTreeMap<(u64, u16), BTreeSet<Vec<u8>>>;
 
 /// What every link thread shares.
 pub struct Shared {
@@ -22,6 +29,14 @@ pub struct Shared {
     fails: FailLimit,
     /// The machines table; `None` when `machines` is empty (no PC ids).
     pub machines: Option<Machines>,
+    /// Every gserver link's outbox, for pushes between gservers.
+    pub links: Links,
+    /// Player profiles (`GETPROF` / `SETPROF`).
+    pub profiles: Profiles,
+    /// Buddy lists.
+    pub buddies: Buddies,
+    /// Channel (`irc`) membership by gserver link and player id.
+    pub channels: Mutex<Channels>,
     open: AtomicUsize,
     next_id: AtomicU64,
     /// Config file to read again on reload. `None` when started from defaults.
@@ -263,6 +278,13 @@ pub fn start_at(config: Config, config_path: Option<PathBuf>) -> Result<Running,
         );
         Some(m)
     };
+    let profiles = Profiles::open(&config.profiles)?;
+    if config.profiles.as_os_str().is_empty() {
+        log!("profiles: in memory");
+    } else {
+        log!("profiles: {}", config.profiles.display());
+    }
+    let buddies = Buddies::open(&config.buddies)?;
     let bind = |port: u16| {
         TcpListener::bind((config.bind.as_str(), port))
             .map_err(|e| format!("cannot listen on {}:{port}: {e}", config.bind))
@@ -285,6 +307,10 @@ pub fn start_at(config: Config, config_path: Option<PathBuf>) -> Result<Running,
         identity_cell: RwLock::new(identity),
         fails: FailLimit::default(),
         machines,
+        links: Links::default(),
+        profiles,
+        buddies,
+        channels: Mutex::new(BTreeMap::new()),
         open: AtomicUsize::new(0),
         next_id: AtomicU64::new(1),
         config_path: Mutex::new(config_path),
@@ -349,6 +375,8 @@ fn spawn_housekeeping(shared: Arc<Shared>) {
                 .clone();
             let mut seen = path.as_deref().and_then(mtime);
             let mut last_status = Instant::now();
+            let mut last_counts = Instant::now();
+            let mut counts = crate::gserver::Counts::default();
             loop {
                 std::thread::sleep(Duration::from_millis(200));
                 if shared.reload_flag.swap(false, Ordering::AcqRel) {
@@ -376,6 +404,10 @@ fn spawn_housekeeping(shared: Arc<Shared>) {
                             }
                         }
                     }
+                }
+                if last_counts.elapsed() >= Duration::from_secs(1) {
+                    crate::gserver::push_counts(&shared, &mut counts);
+                    last_counts = Instant::now();
                 }
                 let secs = shared.config().status_log_secs;
                 if secs > 0 && last_status.elapsed() >= Duration::from_secs(secs) {

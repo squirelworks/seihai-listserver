@@ -101,3 +101,22 @@ pcid_match_hashes = 2
 # Digests that never identify a machine, such as a product id many
 # machines share: 32 hex digits each.
 pcid_ignore_hashes = []
+
+# Player profiles: the nine fields a player sets in the client's profile
+# window, which gservers ask for (GETPROF) and store (SETPROF). Empty: kept
+# in memory until the listserver stops. A relative path is taken from this
+# file's folder. A change takes a restart.
+profiles = ""
+
+# Buddy lists: each account's buddies, which 4.x clients check at login
+# (verifybuddies) and change with addbuddy / deletebuddy. Empty: kept in
+# memory. A relative path is taken from this file's folder. A change takes
+# a restart.
+buddies = ""
+
+# Global guilds. A player whose nickname ends in "(guild)" keeps the tag
+# only when the account is listed under that guild here (case is ignored).
+# Read again on reload. Example:
+#   [guilds]
+#   "Staff" = ["alice", "bob"]
+[guilds]

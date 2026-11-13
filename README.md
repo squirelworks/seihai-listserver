@@ -115,7 +115,15 @@ gen 4 and gen 5 lists carry the HQ level tag (`H ` bronze, none for
 classic, `P ` gold, `3 ` G3D). HQ level 0 is hidden: that gserver appears
 only on the RC list (client id 5), tagged `U `, and is left off the other
 lists. A refused login gets id 4 and the link closes. Gservers: `REGISTERV3`, `NEWSERVER`, `SERVERHQPASS`, `SERVERHQLEVEL`,
-`SETPLYR`, `PLYRADD`, `PLYRREM`, `VERIACC2`, `SERVERINFO`, `SETIP`, `PING`, `SENDTEXT`.
+`SETPLYR`, `PLYRADD`, `PLYRREM`, `VERIACC2`, `SERVERINFO`, `SETIP`, `PING`, `SENDTEXT`,
+and the text features between gservers in
+[`docs/design/gserver-text-profiles-guilds.md`](docs/design/gserver-text-profiles-guilds.md):
+profiles (`GETPROF`, `SETPROF`, saved to `profiles`), global guilds
+(`VERIGUILD`, from `[guilds]`), the PM window's server, guild and player
+tabs and the simple list (`REQUESTLIST`), cross-server PMs (`PMPLAYER`),
+channel chat (`irc`), player counts pushed to the other gservers, and
+buddy lists (`verifybuddies`, `addbuddy`, `deletebuddy`, `REQUESTBUDDIES`,
+saved to `buddies`).
 When a `VERIACC2` that gets in carries a 4.x to 6.03 client's machine
 digests, `SVI_ASSIGNPCID` (30) with the machine's PC id goes out just
 before the `SUCCESS` answer; see [`docs/pcid.md`](docs/pcid.md). A

@@ -1,6 +1,10 @@
 # Gserver link: profiles, guilds, cross-server text, PMs and buddies
 
-Status: **spec only, nothing implemented yet.** The work is split into
+Status: **A to G are implemented** (`src/gserver.rs`, `src/links.rs`,
+`src/profiles.rs`, `src/buddies.rs`, `src/text.rs`; tests in
+`tests/gserver_text.rs`), against fake gservers on loopback. No real
+client or the fork has been run against them yet; the lab runs below are
+still to do. H (SQLite) is not started. The work was split into
 issues labelled `cursor` (see "Issues" at the end). Each section gives the
 wire layout, what the listserver should do, what the gserver does with the
 answer, and how sure we are of it.
@@ -202,6 +206,30 @@ one push per server a second.
 public IP) is a possible extra and is not in scope here.
 
 ## 6. Buddies (issue G) [open]
+
+**Built (2026-11-13), with the open parts chosen as below and marked in
+`src/buddies.rs`.** Buddies are a real Graal feature, not a Seihai idea:
+the 2.x player list has a Buddies section, 4.04r2 and 4.20r8 send
+`verifybuddies` at every login (the live 4.04 login sent
+`GraalEngine,lister,verifybuddies,1,0`), GServer-v2 forwards the three
+options to the listserver, and an open listserver answers with
+`buddylist`. Only the add/delete arguments and the client's handling of
+our reply are unseen. Choices:
+- `addbuddy` / `deletebuddy` take one or more accounts after the option,
+  change the sender's stored list (at most 100, case ignored, no commas),
+  and answer nothing.
+- `verifybuddies,<flag>,<crc>` (Graal_analysis `protocol/v4x-clients.md`:
+  `<flag>` is `loadbuddiesfromserver`, `<crc>` the CRC-32 of the list
+  joined with commas, 0 when empty) is answered with `buddylist` only when
+  `<flag>` is 1 and the CRC differs from the stored list's.
+- `REQUESTBUDDIES` (28) is read as a GSHORT player id, then
+  `account,weapon,type`, and answered with `weapon,type,buddylist,…`.
+- Stored in memory and in the `buddies` file when it is set.
+
+Lab check still to do: a real 4.04r2 or 4.20r8 with
+`loadbuddiesfromserver=1` through the fork, with one account's list
+stored here: does the Buddies tab fill from `buddylist`? And what does a
+2.22 or 4.x client send when a buddy is added?
 
 What we know:
 - The fork forwards `X,lister,verifybuddies|addbuddy|deletebuddy,…` from a
