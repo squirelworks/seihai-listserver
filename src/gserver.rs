@@ -46,6 +46,7 @@ pub mod svo {
 pub mod svi {
     pub const VERIACC2: usize = 11;
     pub const SERVERINFO: usize = 18;
+    pub const ASSIGNPCID: usize = 30;
 }
 
 /// The longest `REGISTERV3` line taken.
@@ -386,19 +387,38 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) ->
             let Some(kind) = p.bytes(1) else {
                 return Step::Quiet;
             };
-            // beta4 appends a GSHORT length and an identity string.
-            let identity = p
-                .gshort()
-                .map(|n| format!(", identity {n} bytes"))
-                .unwrap_or_default();
+            // GServer-v2 (beta4 on) appends a GSHORT length and the
+            // client's machine list, unchanged.
+            let identity = p.gshort().map(|n| {
+                let rest = p.rest();
+                &rest[..rest.len().min(n as usize)]
+            });
             let err = shared.check_login(GuessKind::Veriacc, peer.parse().ok(), account, password);
+            // A PC id only for a login that got in: a refused guess must
+            // not grow the table.
+            let pcid = match (err, identity) {
+                (None, Some(identity)) => pcid_for(shared, id, identity),
+                _ => None,
+            };
             log!(
-                "gserver {id} veriacc2 {} type {}{identity}: {}",
+                "gserver {id} veriacc2 {} type {}{}{}: {}",
                 show(account),
                 kind[0].wrapping_sub(32),
+                identity.map_or(String::new(), |i| format!(", identity {} bytes", i.len())),
+                pcid.map_or(String::new(), |n| format!(", pc id {n}")),
                 err.map_or("ok".into(), |e| format!("refused, {}", show(e)))
             );
-            let mut out = vec![gchar(svi::VERIACC2)];
+            let mut out = Vec::new();
+            // GServer-v2 ignores ASSIGNPCID for a player who is already
+            // loaded, and SUCCESS loads the player, so the PC id goes first.
+            if let Some(n) = pcid {
+                out.push(gchar(svi::ASSIGNPCID));
+                out.extend_from_slice(player);
+                out.extend_from_slice(kind);
+                put_gstr(&mut out, n.to_string().as_bytes());
+                out.push(b'\n');
+            }
+            out.push(gchar(svi::VERIACC2));
             put_gstr(&mut out, account);
             out.extend_from_slice(player);
             out.extend_from_slice(kind);
@@ -453,6 +473,22 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) ->
         _ => {
             log!("gserver {id} unhandled id {pid}: {}", show(p.rest()));
             Step::Quiet
+        }
+    }
+}
+
+/// The PC id for a login's machine list, from the machines table. `None`
+/// when PC ids are off, the list has no usable digest (old clients), or
+/// the table cannot be written.
+fn pcid_for(shared: &Shared, id: u64, identity: &[u8]) -> Option<u64> {
+    let machines = shared.machines.as_ref()?;
+    let cfg = shared.config();
+    let keys = crate::machines::keys(identity, &cfg.pcid_ignore_hashes);
+    match machines.assign(&keys, cfg.pcid_match_hashes) {
+        Ok(n) => n,
+        Err(e) => {
+            log!("gserver {id} no pc id: {e}");
+            None
         }
     }
 }

@@ -80,3 +80,24 @@ require_secure_login = false
 # as above. Refuse plain links: GServer-v2 and the GPL fork cannot register
 # when this is on.
 require_secure_gserver_link = false
+
+# PC ids (docs/pcid.md). Windows 4.x to 6.03 clients, and the Mac and
+# Linux builds of those years, send MD5 digests of machine values after
+# the password; the gserver passes them on with its account check. The
+# listserver keeps a table of machines and answers each login that got in
+# with that machine's number, the PC id, which GServer-v2 shows in its RC
+# ban window. Older clients send no digests and get no PC id. The digests
+# come from the client and can be faked: treat a PC id as a hint beside
+# account and IP bans. Only digests are stored, never an account or address.
+# The machines file. Empty: no PC ids. A relative path is taken from this
+# file's folder. A change takes a restart.
+machines = "seihai-machines.tsv"
+
+# How many of a login's hardware digests (Windows: product id, network
+# card, C: volume serial) must match a known machine for its PC id: 1 to 3.
+# A login that sends fewer must match all it sent.
+pcid_match_hashes = 2
+
+# Digests that never identify a machine, such as a product id many
+# machines share: 32 hex digits each.
+pcid_ignore_hashes = []

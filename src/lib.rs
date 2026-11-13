@@ -11,6 +11,7 @@ pub mod accounts;
 pub mod client;
 pub mod config;
 pub mod gserver;
+pub mod machines;
 pub mod server;
 pub mod state;
 pub mod wire;

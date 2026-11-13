@@ -2,6 +2,7 @@
 
 use crate::accounts::{Accounts, FailLimit, GuessKind};
 use crate::config::Config;
+use crate::machines::Machines;
 use crate::state::Servers;
 use seihai_core::protocol::seclogin::{self, ServerIdentity};
 use std::io;
@@ -19,6 +20,8 @@ pub struct Shared {
     /// This listserver's secure-login key; `None` when secure logins are off.
     identity_cell: RwLock<Option<ServerIdentity>>,
     fails: FailLimit,
+    /// The machines table; `None` when `machines` is empty (no PC ids).
+    pub machines: Option<Machines>,
     open: AtomicUsize,
     next_id: AtomicU64,
     /// Config file to read again on reload. `None` when started from defaults.
@@ -124,6 +127,13 @@ impl Shared {
             cfg.bind.clone_from(&old.bind);
             cfg.gserver_port = old.gserver_port;
             cfg.client_ports.clone_from(&old.client_ports);
+        }
+        if cfg.machines != old.machines {
+            log!(
+                "reload: machines stays {} until a restart",
+                old.machines.display()
+            );
+            cfg.machines.clone_from(&old.machines);
         }
         let accounts = Accounts::new(&cfg.accounts)?;
         let identity = load_identity_existing(&cfg.secure_login_key)?;
@@ -240,6 +250,19 @@ pub fn start_at(config: Config, config_path: Option<PathBuf>) -> Result<Running,
         );
         Some(id)
     };
+    let machines = if config.machines.as_os_str().is_empty() {
+        log!("pc ids: off");
+        None
+    } else {
+        let m = Machines::open(&config.machines)?;
+        let (n, digests) = m.counts();
+        log!(
+            "pc ids: {} machines, {digests} machine digests in {}",
+            n,
+            config.machines.display()
+        );
+        Some(m)
+    };
     let bind = |port: u16| {
         TcpListener::bind((config.bind.as_str(), port))
             .map_err(|e| format!("cannot listen on {}:{port}: {e}", config.bind))
@@ -261,6 +284,7 @@ pub fn start_at(config: Config, config_path: Option<PathBuf>) -> Result<Running,
         servers: Servers::default(),
         identity_cell: RwLock::new(identity),
         fails: FailLimit::default(),
+        machines,
         open: AtomicUsize::new(0),
         next_id: AtomicU64::new(1),
         config_path: Mutex::new(config_path),

@@ -16,6 +16,7 @@ What is done and what is next is in `docs/PLAN.md` and `docs/NEXT.md`.
 | `src/client.rs` | One client link. `Coding` is the link's framing: `Plain` (zlib), `Gen4` (bz2 + XOR), `Gen5` (compression byte + XOR). It starts `Plain`; id 4 switches to `Gen4`, id 5 or 7 to `Gen5`. Id 5 is the RC list (`Gen5` with hidden servers). Id 7 or id 5 with `SEI00001` goes to `secure_login`: S1 out and the sealed id 1 in, both plain, then `Gen5` from the seed; hidden servers only after id 5 (seihai-rc's secure RC list). When `silent_list_after_ms` is set, a link that sends nothing gets the shape A reply. |
 | `src/state.rs` | `Servers` (the gserver table, in connect order, behind one mutex), the id 0 list and id 2 status builders, HQ tags. HQ level 0 is listed only for the RC list. |
 | `src/accounts.rs` | `Accounts::Open` or a file of argon2id hashes, read again when its mtime changes; `add_account`. `FailLimit` caps failed client logins and failed `VERIACC2` checks per address. |
+| `src/machines.rs` | The machines table for PC ids: splits the client's machine list, keeps the hardware digests, matches `pcid_match_hashes` of them to a known machine or makes one, and appends to the `machines` file. See `docs/pcid.md`. |
 | `src/wire.rs` | GCHAR/GSTRING/GSHORT, the `u16be` frame, `show()` for safe log text. |
 | `src/log.rs` | `log!`: timestamped lines to stderr and the optional `log_file`. |
 
@@ -29,6 +30,7 @@ From `seihai-core` (git tag in `Cargo.toml`) it uses only
 ```
 gserver --REGISTERV3, NEWSERVER, PLYRADD...--> gserver.rs --> Servers (state.rs)
                                     VERIACC2 --> accounts.rs --> SVI_VERIACC2 back
+                                             machines.rs --> SVI_ASSIGNPCID first
 client --login frame--> client.rs --account--> accounts.rs
                                   <--list/status-- Servers
 ```
@@ -63,6 +65,7 @@ client --login frame--> client.rs --account--> accounts.rs
 - `tests/shapes.rs`: the Python lab tests, on free loopback ports.
 - `tests/seihai_client.rs`: Seihai's list client for 2.05, 2.17, 2.22, 2.31, 3.04.
 - `tests/secure_login.rs`: the Seihai secure login (`SEI00001`): right and wrong password, wrong key, trust on first use, `require_secure_login`, a tampered seal; the RC list (id 5) over the same handshake, with hidden servers, a wrong password, the classic RC refused under `require_secure_login`, and the rate limit.
+- `tests/pcid.rs`: `ASSIGNPCID` before `VERIACC2`, with graal-client-repro's made-up machine fields; none for old clients or refused logins.
 - `tests/rest.rs`: shape S, the login-failure cap, config reload.
 - `key-fingerprint` is covered by a library test: it prints the public key and fingerprint, and a missing file is an error.
 - By hand: `python3 -I docs/reference/test_listserver.py` against a running
