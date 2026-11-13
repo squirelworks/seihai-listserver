@@ -1,0 +1,133 @@
+name: macOS builds
+
+# Runs only when started by hand (Actions → "macOS builds" → Run workflow).
+# Builds the macOS archives for one release on GitHub's macOS runners:
+# Apple Silicon (aarch64) and Intel (x86_64), each built, tested and started
+# natively on its own kind of Mac. Unsigned, like the lab builds.
+#
+# By default the archives are only kept as files of the run. Tick
+# "upload" to also attach them to the release, replacing any macOS
+# archives already there.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build, e.g. v0.1.1. A published release builds its tag; a draft builds the commit it targets.'
+        required: true
+      upload:
+        description: 'Also attach the two archives to that release (replaces macOS archives already there)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.find.outputs.ref }}
+    steps:
+      - name: Find the commit for the tag
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || { echo "::error::bad tag $TAG"; exit 1; }
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            REF="refs/tags/$TAG"
+          else
+            # A draft has no tag until it is published: build what it targets.
+            REF=$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json targetCommitish -q .targetCommitish 2>/dev/null || true)
+            [ -n "$REF" ] || { echo "::error::No tag or draft release named $TAG"; exit 1; }
+          fi
+          echo "Building $TAG from $REF"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS 15 (Sequoia), like the lab VM. Each target builds on its own
+          # kind of Mac so the tests and the smoke start run natively.
+          - os: macos-15
+            target: aarch64-apple-darwin
+            arch: arm64
+            name: seihai-listserver-macos-aarch64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x86_64
+            name: seihai-listserver-macos-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Check the runner
+        run: |
+          uname -m
+          sw_vers
+          [ "$(uname -m)" = "${{ matrix.arch }}" ] || { echo "::error::expected a ${{ matrix.arch }} runner"; exit 1; }
+      - name: Test
+        run: cargo test --target ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Smoke test
+        run: |
+          BIN=$PWD/target/${{ matrix.target }}/release/seihai-listserver
+          file "$BIN"
+          [ "$(lipo -archs "$BIN")" = "${{ matrix.arch }}" ] || { echo "::error::binary is not ${{ matrix.arch }}"; exit 1; }
+          "$BIN" --version
+          "$BIN" sample-config > /dev/null
+          # Start it with the defaults (127.0.0.1 only) and wait for a client port.
+          WORK=$(mktemp -d)
+          ( cd "$WORK" && exec "$BIN" ) 2> "$WORK/log" &
+          PID=$!
+          for _ in $(seq 1 50); do
+            nc -z 127.0.0.1 14921 && break
+            kill -0 "$PID" 2>/dev/null || break
+            sleep 0.2
+          done
+          nc -z 127.0.0.1 14921 && UP=1 || UP=0
+          kill "$PID" 2>/dev/null || true
+          wait "$PID" 2>/dev/null || true
+          cat "$WORK/log"
+          [ "$UP" = 1 ] || { echo "::error::the listserver did not open port 14921"; exit 1; }
+      - name: Package
+        run: |
+          mkdir -p dist/${{ matrix.name }}
+          cp target/${{ matrix.target }}/release/seihai-listserver README.md LICENSE-MIT LICENSE-APACHE seihai-listserver.sample.toml dist/${{ matrix.name }}/
+          tar czf ${{ matrix.name }}.tar.gz -C dist ${{ matrix.name }}
+          shasum -a 256 ${{ matrix.name }}.tar.gz | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}.tar.gz
+
+  upload:
+    if: inputs.upload
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          ls -l dist
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber dist/*.tar.gz
+          echo "Attached to $(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json url -q .url)" >> "$GITHUB_STEP_SUMMARY"
