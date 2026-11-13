@@ -85,6 +85,17 @@ pub struct Config {
     /// Seconds one address's failure count covers. 0: no cap.
     #[serde(default = "default_login_fail_window_secs")]
     pub login_fail_window_secs: u64,
+    /// The machines table (PC ids, see `src/machines.rs`). Empty: no PC
+    /// ids are given out. Read at start; a change takes a restart.
+    pub machines: PathBuf,
+    /// MD5 digests (32 hex digits) that never identify a machine, such as a
+    /// product id that many machines share. Read again on reload.
+    pub pcid_ignore_hashes: Vec<String>,
+    /// How many hardware digests a login must share with a known machine
+    /// to get its PC id (1 to 3). A login that sends fewer must share all
+    /// it sent. Read again on reload.
+    #[serde(default = "default_pcid_match_hashes")]
+    pub pcid_match_hashes: usize,
     /// How often to log how many servers and players are listed. 0: off.
     #[serde(default = "default_status_log_secs")]
     pub status_log_secs: u64,
@@ -100,6 +111,10 @@ fn default_login_fail_limit() -> u32 {
 
 fn default_login_fail_window_secs() -> u64 {
     60
+}
+
+fn default_pcid_match_hashes() -> usize {
+    2
 }
 
 fn default_status_log_secs() -> u64 {
@@ -129,13 +144,16 @@ impl Default for Config {
             silent_list_after_ms: default_silent_list_after_ms(),
             login_fail_limit: default_login_fail_limit(),
             login_fail_window_secs: default_login_fail_window_secs(),
+            machines: PathBuf::from("seihai-machines.tsv"),
+            pcid_ignore_hashes: Vec::new(),
+            pcid_match_hashes: default_pcid_match_hashes(),
             status_log_secs: default_status_log_secs(),
         }
     }
 }
 
 impl Config {
-    /// Read a config file. A relative `accounts`, `log_file` or
+    /// Read a config file. A relative `accounts`, `log_file`, `machines` or
     /// `secure_login_key` path is taken from the config file's folder.
     pub fn load(path: &Path) -> Result<Self, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -145,6 +163,7 @@ impl Config {
             &mut cfg.accounts,
             &mut cfg.log_file,
             &mut cfg.secure_login_key,
+            &mut cfg.machines,
         ] {
             if !p.as_os_str().is_empty() && p.is_relative() {
                 *p = dir.join(&*p);
@@ -155,8 +174,11 @@ impl Config {
 
     /// Parse config text.
     pub fn parse(text: &str) -> Result<Self, String> {
-        let cfg: Self = toml::from_str(text).map_err(|e| e.to_string())?;
+        let mut cfg: Self = toml::from_str(text).map_err(|e| e.to_string())?;
         cfg.check()?;
+        for h in &mut cfg.pcid_ignore_hashes {
+            h.make_ascii_lowercase();
+        }
         Ok(cfg)
     }
 
@@ -174,6 +196,16 @@ impl Config {
         ] {
             if v.contains(['\n', '\r']) {
                 return Err(format!("{key} must be one line"));
+            }
+        }
+        if !(1..=crate::machines::HARDWARE_SLOTS).contains(&self.pcid_match_hashes) {
+            return Err("pcid_match_hashes must be 1, 2 or 3".into());
+        }
+        for h in &self.pcid_ignore_hashes {
+            if h.len() != 32 || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(format!(
+                    "pcid_ignore_hashes must be MD5 digests of 32 hex digits, not {h:?}"
+                ));
             }
         }
         for g in &self.gservers {
@@ -240,6 +272,9 @@ mod tests {
         assert_eq!(s.login_fail_limit, d.login_fail_limit);
         assert_eq!(s.login_fail_window_secs, d.login_fail_window_secs);
         assert_eq!(s.status_log_secs, d.status_log_secs);
+        assert_eq!(s.machines, d.machines);
+        assert!(s.pcid_ignore_hashes.is_empty());
+        assert_eq!(s.pcid_match_hashes, d.pcid_match_hashes);
     }
 
     #[test]
@@ -277,5 +312,15 @@ mod tests {
         assert!(Config::parse("client_ports = []").is_err());
         assert!(Config::parse("site_url = \"a\\nb\"").is_err());
         assert!(Config::parse("gserver_ip = \"sent\"").is_ok());
+        assert!(Config::parse("pcid_ignore_hashes = [\"abc\"]").is_err());
+        assert!(Config::parse("pcid_match_hashes = 0").is_err());
+        assert!(Config::parse("pcid_match_hashes = 4").is_err());
+        assert_eq!(Config::parse("").unwrap().pcid_match_hashes, 2);
+        let c =
+            Config::parse("pcid_ignore_hashes = [\"D41D8CD98F00B204E9800998ECF8427E\"]").unwrap();
+        assert_eq!(
+            c.pcid_ignore_hashes,
+            vec!["d41d8cd98f00b204e9800998ecf8427e"]
+        );
     }
 }
