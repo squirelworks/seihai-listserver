@@ -196,7 +196,12 @@ shape tests (`tests/shapes.rs`), the silent-list, login-cap and reload tests
 the encrypted gserver link (`tests/secure_gserver_link.rs`). The
 `key-fingerprint` command is covered by a library test in `src/server.rs`.
 
-Releases for Linux, Windows and macOS are built by GitHub Actions on each `v*` tag.
+Releases for Linux and Windows are built by GitHub Actions on each `v*` tag.
+macOS archives (Apple Silicon and Intel) are built only when the owner starts
+the "macOS builds" workflow by hand for a release tag (Actions → macOS builds →
+Run workflow). It tests and starts the server on each kind of Mac, and attaches
+the archives to the release only when its "upload" box is ticked. The builds
+are not signed.
 
 ## Licence
 

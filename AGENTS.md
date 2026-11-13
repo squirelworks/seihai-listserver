@@ -56,4 +56,8 @@ request seems to ask otherwise; ask the owner (Squirrel, GitHub `squirelworks`) 
 
 ## macOS builds
 
-macOS is built and tested on the lab's Sequoia (macOS 15) VM with the same build and test commands the Linux job runs; GitHub CI covers Linux and Windows.
+GitHub CI and the tag release cover Linux and Windows. macOS archives come from the
+manual "macOS builds" workflow (`.github/workflows/macos.yml`, macOS 15 runners,
+arm64 and Intel), which the owner starts for a release tag; it uploads to the
+release only when asked. The lab's Sequoia (macOS 15) VM can still build and test
+with the same commands. Builds stay unsigned.

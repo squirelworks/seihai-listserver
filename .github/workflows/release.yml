@@ -10,19 +10,21 @@ on:
         description: 'Version to draft, without the v (e.g. 0.1.0). Leave empty to build only.'
         required: false
         default: ''
-      skip_macos:
-        description: 'Leave out the two macOS builds (when GitHub has no macOS runners). Run again without it later to add them to the same draft.'
-        type: boolean
-        required: false
-        default: false
 
 jobs:
   build:
     strategy:
       fail-fast: false
-      # skip_macos (manual runs only) leaves out the macOS rows; a tag push builds all four.
+      # macOS is not built here: run the "macOS builds" workflow (macos.yml)
+      # by hand when a release should get macOS archives.
       matrix:
-        include: ${{ fromJSON(inputs.skip_macos && '[{"os":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","name":"seihai-listserver-linux-x86_64"},{"os":"windows-latest","target":"x86_64-pc-windows-msvc","name":"seihai-listserver-windows-x86_64"}]' || '[{"os":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","name":"seihai-listserver-linux-x86_64"},{"os":"windows-latest","target":"x86_64-pc-windows-msvc","name":"seihai-listserver-windows-x86_64"},{"os":"macos-latest","target":"x86_64-apple-darwin","name":"seihai-listserver-macos-x86_64"},{"os":"macos-latest","target":"aarch64-apple-darwin","name":"seihai-listserver-macos-aarch64"}]') }}
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: seihai-listserver-linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: seihai-listserver-windows-x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
