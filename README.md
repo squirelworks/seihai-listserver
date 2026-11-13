@@ -119,6 +119,27 @@ lists. A refused login gets id 4 and the link closes. Gservers: `REGISTERV3`, `N
 gserver's entry is dropped when its link closes or is silent for
 `gserver_timeout_secs`.
 
+### Which tab a lab server shows under
+
+The HQ level comes from the gserver (`hq_level` in GServer-v2's
+`config/adminconfig.txt`, default 1), and the client files each server under
+the tab for its tag:
+
+| `hq_level` | Tag | Tab |
+|---|---|---|
+| 0 | `U ` | RC list only |
+| 1 | `H ` | Bronze (2.22) or Hosted (2.31) |
+| 2 | none | Classic |
+| 3 | `P ` | Gold |
+| 4 | `3 ` | 3D |
+
+The 3.04 server list has no Hosted button and opens on Classic, so a lab
+server left at the default `hq_level = 1` does not show up there. For a
+3.04 lab, set `hq_level = 2` (Classic) on the lab gservers. To see `H `
+servers without changing the gserver, run
+`Adventure.selectServerCategory(3)` in the 3.04 console (F2). The 3.04
+categories are 0 Gold, 1 3D, 2 Classic and 3 Hosted.
+
 `SERVERINFO` is a server warp: a gserver asks where a named server is, for
 one player. The listserver answers `0,<name>,<host>,<port>`, matching the
 name without regard to case and including hidden servers; an unknown name
