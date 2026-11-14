@@ -62,7 +62,7 @@ accounts are argon2id hashes made with `seihai-listserver add-account`.
 Checked on loopback in a container:
 
 - `cargo test`: the shape tests (`tests/shapes.rs`) and Seihai's list client
-  from seihai-core (now v0.0.6) for 2.05, 2.17, 2.22, 2.31 and 3.04
+  from seihai-core (at the time of that check) for 2.05, 2.17, 2.22, 2.31 and 3.04
   (`tests/seihai_client.rs`), right and wrong passwords.
 - `docs/reference/test_listserver.py` run unchanged against the Rust binary
   (open mode, and with an accounts file and `--bad-login`): all checks pass.
@@ -80,6 +80,19 @@ client port, `secure_login_key` and `require_secure_login` settings, tests in
 `tests/secure_login.rs` with Seihai's own client.
 
 Also done: the encrypted gserver link (`VERIACC2`, 17), `seihai-core` on
-tag `v0.0.6`, and the `key-fingerprint` command. What is still open (the
-RC list over the same handshake) is tracked in `docs/NEXT.md`, the one
-to-do list for this repo.
+tag `v0.0.6` at that stage, and the `key-fingerprint` command.
+The secure RC list (id 5) landed in #22 and was checked with seihai-rc
+on loopback (`docs/lab/2026-11-12-secure-rc-list.md`).
+
+## Current follow-through (2026-11-14)
+
+The original port and secure RC follow-up are complete. `Cargo.toml`
+now pins `seihai-core` from its own repository at tag `v0.1.0` (#43).
+PC ids landed in #46; gserver text, profiles, guilds, cross-server PMs,
+channels and buddies in #47; optional SQLite profile/buddy storage in #48.
+The 4.20r8 buddy and PM-tab checks are recorded in #49. That lab did not
+cover the same PM tab on 2.x clients.
+
+`docs/NEXT.md` and roadmap issue #20 track remaining evidence and limits.
+These main-branch additions do not imply inclusion in the published
+`v0.1.1` tag, which points to the earlier release-notes commit `fa062f4`.
