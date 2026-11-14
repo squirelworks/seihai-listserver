@@ -55,7 +55,7 @@ where the code goes.
 - Done (2026-10-31): the encrypted gserver link, so `VERIACC2` is no longer
   in the clear between Seihai's gserver and this listserver.
 - Done: the core update to `v0.0.6` landed in #21 (2026-11-11).
-  The current `Cargo.toml` pin is `seihai-core` tag `v0.1.0` (#43).
+  The current `Cargo.toml` pin is `seihai-core` tag `v0.2.16` (was `v0.1.0`, #43).
 - Done (2026-11-01): `key-fingerprint` prints the public key and fingerprint
   without starting, and does not create a missing key file.
 

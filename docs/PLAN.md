@@ -87,7 +87,8 @@ on loopback (`docs/lab/2026-11-12-secure-rc-list.md`).
 ## Current follow-through (2026-11-14)
 
 The original port and secure RC follow-up are complete. `Cargo.toml`
-now pins `seihai-core` from its own repository at tag `v0.1.0` (#43).
+now pins `seihai-core` from its own repository at tag `v0.2.16`
+(was `v0.1.0`, #43).
 PC ids landed in #46; gserver text, profiles, guilds, cross-server PMs,
 channels and buddies in #47; optional SQLite profile/buddy storage in #48.
 The 4.20r8 buddy and PM-tab checks are recorded in #49. That lab did not
