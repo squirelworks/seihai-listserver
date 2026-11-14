@@ -34,22 +34,30 @@ struct Gs {
 
 impl Gs {
     fn open(run: &Running, name: &[u8]) -> Gs {
+        let mut g = Self::link(run);
+        g.register(name);
+        g
+    }
+
+    fn link(run: &Running) -> Gs {
         let mut s = TcpStream::connect(run.gserver_addr).unwrap();
         s.write_all(&[&[gchar(30)][..], b"lab-test\n"].concat())
             .unwrap();
-        let mut g = Gs {
+        Gs {
             s,
             got: Vec::new(),
             buf: Vec::new(),
-        };
+        }
+    }
+
+    fn register(&mut self, name: &[u8]) {
         let mut body = Vec::new();
         for f in [
             name, b"desc", b"English", b"2.31", b"", b"AUTO", b"14802", b"",
         ] {
             body.extend(gstr(f));
         }
-        g.send(&[line(22, &body), line(24, &[gchar(3)])]);
-        g
+        self.send(&[line(22, &body), line(24, &[gchar(3)])]);
     }
 
     fn send(&mut self, msgs: &[Vec<u8>]) {
@@ -293,6 +301,99 @@ fn channels_answer_join_and_relay_chat_to_the_other_servers() {
     );
     a.requestlist(3, b"GraalEngine,irc,part,#graal");
     assert_eq!(a.request_text(3), "GraalEngine,irc,part,#graal");
+}
+
+#[test]
+fn password_gated_links_only_receive_broadcasts_after_authentication() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config =
+        Config::parse("gservers = [{ ip = \"127.0.0.1\", hq_password = \"test-only-hq\" }]")
+            .unwrap();
+    config.gserver_port = 0;
+    config.client_ports = vec![0];
+    config.secure_login_key = dir.path().join("test-login.key");
+    config.profiles = dir.path().join("profiles.tsv");
+    config.buddies = dir.path().join("buddies.tsv");
+    config.machines = Default::default();
+    let run = seihai_listserver::start(config).unwrap();
+
+    let mut waiting = Gs::link(&run);
+    let mut sender = Gs::link(&run);
+    sender.send(&[line(23, b"test-only-hq")]);
+    sender.register(b"Alpha");
+    wait_listed(&run, 1);
+    sender.add_player(3, b"alice", b"Alice");
+    sender.requestlist(3, b"GraalEngine,irc,join,#lab");
+    assert_eq!(sender.request_text(3), "GraalEngine,irc,join,#lab");
+    sender.requestlist(3, b"GraalEngine,irc,privmsg,alice,#lab,before-auth");
+    // Covers both channel relay and periodic player-count broadcasts.
+    assert!(waiting.sendtexts(Duration::from_millis(1500)).is_empty());
+
+    waiting.send(&[line(23, b"test-only-hq")]);
+    waiting.register(b"Beta");
+    wait_listed(&run, 2);
+    let initial = waiting.sendtexts(Duration::from_millis(300));
+    assert!(
+        initial
+            .iter()
+            .any(|t| t == "Listserver,Modify,Server,Alpha,players=1"),
+        "{initial:?}"
+    );
+    sender.add_player(5, b"carol", b"Carol");
+    sender.requestlist(3, b"GraalEngine,irc,privmsg,alice,#lab,after-auth");
+    let received = waiting.sendtexts(Duration::from_millis(2500));
+    assert!(
+        received
+            .iter()
+            .any(|t| t == "GraalEngine,irc,privmsg,alice,#lab,after-auth"),
+        "{received:?}"
+    );
+    assert!(
+        received
+            .iter()
+            .any(|t| t == "Listserver,Modify,Server,Alpha,players=2"),
+        "{received:?}"
+    );
+
+    let mut wrong = Gs::link(&run);
+    wrong.send(&[line(23, b"wrong-test-password")]);
+    wrong.s.set_read_timeout(Some(WAIT)).unwrap();
+    let mut bytes = [0; 128];
+    match wrong.s.read(&mut bytes) {
+        Ok(0) => {}
+        Err(e)
+            if matches!(
+                e.kind(),
+                ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
+            ) => {}
+        other => panic!("wrong password must close without broadcasts: {other:?}"),
+    }
+}
+
+#[test]
+fn open_mode_link_receives_broadcasts_without_an_hq_password() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = lab(dir.path());
+    let mut receiver = Gs::link(&run);
+    let mut sender = Gs::open(&run, b"Alpha");
+    wait_listed(&run, 1);
+    sender.add_player(3, b"alice", b"Alice");
+    sender.requestlist(3, b"GraalEngine,irc,join,#lab");
+    assert_eq!(sender.request_text(3), "GraalEngine,irc,join,#lab");
+    sender.requestlist(3, b"GraalEngine,irc,privmsg,alice,#lab,open-mode");
+    let received = receiver.sendtexts(Duration::from_millis(2500));
+    assert!(
+        received
+            .iter()
+            .any(|t| t == "GraalEngine,irc,privmsg,alice,#lab,open-mode"),
+        "{received:?}"
+    );
+    assert!(
+        received
+            .iter()
+            .any(|t| t == "Listserver,Modify,Server,Alpha,players=1"),
+        "{received:?}"
+    );
 }
 
 #[test]
