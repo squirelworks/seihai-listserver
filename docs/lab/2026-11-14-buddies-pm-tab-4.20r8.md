@@ -1,7 +1,7 @@
 # Lab run: buddies and the PM server tab with a real 4.20r8, 2026-11-14
 
 Checks the open points of design §3 (`pmservers`) and §6 (buddies) with
-a real client. GwenTea2 host, loopback only: the client ran under Wine
+a real client. Lab host, loopback only: the client ran under Wine
 in a network namespace with only loopback, so it could reach no public
 server. Lab accounts only (`labbud1`, `labbud2`, `labbud3`).
 
