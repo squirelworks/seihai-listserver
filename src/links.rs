@@ -102,7 +102,9 @@ fn write_loop(id: u64, mut sink: Sink, rx: Receiver<Vec<u8>>) {
     }
 }
 
-/// Every open gserver link's outbox, by link id.
+/// Authenticated gserver links' outboxes, by link id. Intentionally open
+/// mode links are eligible immediately; password-gated links are added
+/// by the session only after their HQ password is accepted.
 #[derive(Default)]
 pub struct Links {
     out: Mutex<BTreeMap<u64, Outbox>>,

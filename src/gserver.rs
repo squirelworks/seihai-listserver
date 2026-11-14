@@ -20,7 +20,8 @@
 //!
 //! When `gservers` is set, a link from any other address is dropped, and
 //! `NEWSERVER` (and account checks) are ignored until `SERVERHQPASS`
-//! matches that address's password. An empty list keeps the open behaviour.
+//! matches that address's password. Broadcasts are withheld until then too.
+//! An empty list keeps the open behaviour.
 
 use crate::accounts::GuessKind;
 use crate::config::Config;
@@ -187,7 +188,9 @@ fn session<R: Read>(
             show(reg)
         );
     }
-    shared.links.add(id, outbox.clone());
+    if auth.ok {
+        shared.links.add(id, outbox.clone());
+    }
     let mut pm = PmRate::default();
 
     loop {
@@ -204,7 +207,12 @@ fn session<R: Read>(
             }
         };
         for line in wire::lines(&raw) {
-            match handle(line, id, peer, shared, auth, &mut pm) {
+            let was_authenticated = auth.ok;
+            let step = handle(line, id, peer, shared, auth, &mut pm);
+            if !was_authenticated && auth.ok {
+                shared.links.add(id, outbox.clone());
+            }
+            match step {
                 Step::Quiet => {}
                 Step::Reply(reply) => {
                     outbox.send(reply);
