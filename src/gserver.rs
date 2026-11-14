@@ -13,22 +13,35 @@
 //! ChaCha20-Poly1305 records, so players' passwords in `VERIACC2` never
 //! cross the wire in the clear.
 //!
+//! Each link has an outbox ([`crate::links`]), so other links can push to
+//! it: cross-server PMs, channel chat and player counts. Profiles, global
+//! guilds, the PM server and player lists, channels and buddies are in
+//! `docs/design/gserver-text-profiles-guilds.md`.
+//!
 //! When `gservers` is set, a link from any other address is dropped, and
 //! `NEWSERVER` (and account checks) are ignored until `SERVERHQPASS`
 //! matches that address's password. An empty list keeps the open behaviour.
 
 use crate::accounts::GuessKind;
 use crate::config::Config;
+use crate::links::{Outbox, SealedRead, Sink};
 use crate::server::Shared;
+use crate::state::{hq_tag, Player};
+use crate::text;
 use crate::wire::{self, gchar, put_gstr, show, Fields};
 use seihai_core::protocol::seclogin::{self, ClientHello};
-use seihai_core::protocol::{write_zlib_frame, zlib_decompress};
+use seihai_core::protocol::zlib_decompress;
+use std::collections::BTreeMap;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, TcpStream};
+use std::time::{Duration, Instant};
 
 /// Gserver to listserver ids.
 pub mod svo {
     pub const SETIP: usize = 5;
+    pub const VERIGUILD: usize = 9;
+    pub const GETPROF: usize = 12;
+    pub const SETPROF: usize = 13;
     pub const SETPLYR: usize = 7;
     pub const PLYRADD: usize = 14;
     pub const PLYRREM: usize = 15;
@@ -38,16 +51,31 @@ pub mod svo {
     pub const SERVERHQPASS: usize = 23;
     pub const SERVERHQLEVEL: usize = 24;
     pub const SERVERINFO: usize = 25;
+    pub const REQUESTLIST: usize = 26;
+    pub const REQUESTBUDDIES: usize = 28;
+    pub const PMPLAYER: usize = 29;
     pub const REGISTERV3: usize = 30;
     pub const SENDTEXT: usize = 31;
 }
 
 /// Listserver to gserver ids.
 pub mod svi {
+    pub const VERIGUILD: usize = 1;
+    pub const PROFILE: usize = 7;
     pub const VERIACC2: usize = 11;
     pub const SERVERINFO: usize = 18;
+    pub const REQUESTTEXT: usize = 19;
+    pub const SENDTEXT: usize = 20;
+    pub const PMPLAYER: usize = 29;
     pub const ASSIGNPCID: usize = 30;
 }
+
+/// Cross-server PMs one link may send in a second; more are dropped.
+const PM_PER_SEC: u32 = 20;
+
+/// The `PLYRADD` prop ids read for the player's account and nickname.
+const PROP_NICKNAME: usize = 0;
+const PROP_ACCOUNTNAME: usize = 34;
 
 /// The longest `REGISTERV3` line taken.
 const MAX_REGISTER: u64 = 1024;
@@ -62,6 +90,12 @@ pub fn serve(stream: TcpStream, id: u64, shared: &Shared) {
     log!("gserver {id} connected from {peer}");
     shared.servers.insert(id);
     let result = run(stream, id, &peer, shared, auth);
+    shared.links.remove(id);
+    shared
+        .channels
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|(link, _), _| *link != id);
     let entry = shared.servers.remove(id);
     let name = entry
         .and_then(|e| e.name)
@@ -70,29 +104,6 @@ pub fn serve(stream: TcpStream, id: u64, shared: &Shared) {
     match result {
         Ok(()) => log!("gserver {id} closed: {name}, entry dropped"),
         Err(e) => log!("gserver {id} closed ({e}): {name}, entry dropped"),
-    }
-}
-
-/// The link's two halves as one stream, so a [`seclogin::Channel`] can
-/// wrap it. Reads go through the buffered reader the first line was read
-/// with, so nothing it already holds is lost.
-struct Duplex {
-    reader: BufReader<TcpStream>,
-    writer: TcpStream,
-}
-
-impl Read for Duplex {
-    fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
-        self.reader.read(b)
-    }
-}
-
-impl Write for Duplex {
-    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
-        self.writer.write(b)
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        self.writer.flush()
     }
 }
 
@@ -111,18 +122,16 @@ fn first_line<R: BufRead>(r: &mut R) -> io::Result<Vec<u8>> {
 
 fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared, mut auth: Auth) -> io::Result<()> {
     stream.set_read_timeout(Some(shared.config().gserver_timeout()))?;
-    let writer = stream.try_clone()?;
-    let mut link = Duplex {
-        reader: BufReader::new(stream),
-        writer,
-    };
-    let line = first_line(&mut link.reader)?;
+    let mut writer = stream.try_clone()?;
+    let mut reader = BufReader::new(stream);
+    let line = first_line(&mut reader)?;
     if !line.starts_with(seclogin::TOKEN.as_bytes()) {
         if shared.config().require_secure_gserver_link {
             log!("gserver {id} plain link refused (require_secure_gserver_link)");
             return Ok(());
         }
-        return session(&mut BufReader::new(link), line, id, peer, shared, &mut auth);
+        let outbox = Outbox::start(id, Sink::Plain(writer))?;
+        return session(&mut reader, line, id, peer, shared, &mut auth, outbox);
     }
     // The encrypted link: C1 here, S1 back, then records both ways.
     let hello = match ClientHello::parse(&line, 0) {
@@ -143,26 +152,30 @@ fn run(stream: TcpStream, id: u64, peer: &str, shared: &Shared, mut auth: Auth) 
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
     };
     s1.push(b'\n');
-    link.write_all(&s1)?;
-    link.flush()?;
+    writer.write_all(&s1)?;
+    writer.flush()?;
     log!(
         "gserver {id} encrypted link (SEI00001 {})",
         seclogin::LINK_TOKEN
     );
-    let mut inner = BufReader::new(opener.into_channel().wrap(link));
+    let (send, recv) = opener.into_channel().split();
+    let outbox = Outbox::start(id, Sink::Sealed(writer, send))?;
+    let mut inner = BufReader::new(SealedRead::new(reader, recv));
     let line = first_line(&mut inner)?;
-    session(&mut inner, line, id, peer, shared, &mut auth)
+    session(&mut inner, line, id, peer, shared, &mut auth, outbox)
 }
 
-/// The classic link from its first line (`reg`, the `REGISTERV3` line) on,
-/// over `link`: plain, or inside the encrypted channel.
-fn session<S: Read + Write>(
-    link: &mut BufReader<S>,
+/// The classic link from its first line (`reg`, the `REGISTERV3` line) on:
+/// messages read from `link` (plain, or opened from the encrypted
+/// channel), answers queued to `outbox`.
+fn session<R: Read>(
+    link: &mut BufReader<R>,
     reg: Vec<u8>,
     id: u64,
     peer: &str,
     shared: &Shared,
     auth: &mut Auth,
+    outbox: Outbox,
 ) -> io::Result<()> {
     let reg_id = reg[0].wrapping_sub(32) as usize;
     let reg = &reg[1..reg.len() - 1];
@@ -174,6 +187,8 @@ fn session<S: Read + Write>(
             show(reg)
         );
     }
+    shared.links.add(id, outbox.clone());
+    let mut pm = PmRate::default();
 
     loop {
         let body = match wire::read_frame(link) {
@@ -189,16 +204,35 @@ fn session<S: Read + Write>(
             }
         };
         for line in wire::lines(&raw) {
-            match handle(line, id, peer, shared, auth) {
+            match handle(line, id, peer, shared, auth, &mut pm) {
                 Step::Quiet => {}
                 Step::Reply(reply) => {
-                    let w = link.get_mut();
-                    w.write_all(&write_zlib_frame(&reply)?)?;
-                    w.flush()?;
+                    outbox.send(reply);
                 }
                 Step::Close => return Ok(()),
             }
         }
+    }
+}
+
+/// A link's cross-server PM budget: [`PM_PER_SEC`] in each second.
+#[derive(Default)]
+struct PmRate {
+    since: Option<Instant>,
+    sent: u32,
+}
+
+impl PmRate {
+    fn allow(&mut self, now: Instant) -> bool {
+        match self.since {
+            Some(t) if now.duration_since(t) < Duration::from_secs(1) => {}
+            _ => {
+                self.since = Some(now);
+                self.sent = 0;
+            }
+        }
+        self.sent += 1;
+        self.sent <= PM_PER_SEC
     }
 }
 
@@ -288,7 +322,14 @@ fn bytes_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 /// Handle one message.
-fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) -> Step {
+fn handle(
+    line: &[u8],
+    id: u64,
+    peer: &str,
+    shared: &Shared,
+    auth: &mut Auth,
+    pm: &mut PmRate,
+) -> Step {
     let pid = line[0].wrapping_sub(32) as usize;
     let mut p = Fields::new(&line[1..]);
     // Account checks and the list entry stay closed until the HQ password
@@ -325,6 +366,10 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) ->
                 show(&ver),
                 show(&ip)
             );
+            let first = shared
+                .servers
+                .update(id, |e| e.name.is_none())
+                .unwrap_or(false);
             shared.servers.update(id, |e| {
                 e.name = Some(name);
                 e.description = desc;
@@ -334,6 +379,13 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) ->
                 e.ip = ip;
                 e.port = port;
             });
+            if first {
+                // Tell the new gserver how many players the others have;
+                // later changes come from `push_counts`.
+                for (_, name, _, n) in shared.servers.public(Some(id)) {
+                    shared.links.send(id, count_text(&name, n as i64));
+                }
+            }
             Step::Quiet
         }
         svo::SERVERHQLEVEL => {
@@ -346,6 +398,11 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) ->
         }
         svo::SETPLYR => {
             shared.servers.update(id, |e| e.players.clear());
+            shared
+                .channels
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|(link, _), _| *link != id);
             Step::Quiet
         }
         svo::PLYRADD => {
@@ -353,14 +410,29 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) ->
                 return Step::Quiet;
             };
             let kind = p.gchar().unwrap_or(0);
+            let mut who = Player {
+                kind,
+                ..Player::default()
+            };
+            // ACCOUNTNAME and NICKNAME come first; stop at any other prop.
+            while let Some(prop) = p.gchar() {
+                let field = match prop {
+                    PROP_ACCOUNTNAME => &mut who.account,
+                    PROP_NICKNAME => &mut who.nickname,
+                    _ => break,
+                };
+                let Some(v) = p.gstr() else { break };
+                *field = v.to_vec();
+            }
+            log!(
+                "gserver {id} player add {player} type {kind} {}",
+                show(&who.account)
+            );
             let now = shared.servers.update(id, |e| {
-                e.players.insert(player);
+                e.players.insert(player, who);
                 e.players.len()
             });
-            log!(
-                "gserver {id} player add {player} type {kind}, now {}",
-                now.unwrap_or(0)
-            );
+            log!("gserver {id} now {} player(s)", now.unwrap_or(0));
             Step::Quiet
         }
         svo::PLYRREM => {
@@ -371,6 +443,11 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) ->
                 e.players.remove(&player);
                 e.players.len()
             });
+            shared
+                .channels
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&(id, player));
             log!("gserver {id} player rem {player}, now {}", now.unwrap_or(0));
             Step::Quiet
         }
@@ -470,11 +547,367 @@ fn handle(line: &[u8], id: u64, peer: &str, shared: &Shared, auth: &mut Auth) ->
             log!("gserver {id} sendtext {}", show(p.rest()));
             Step::Quiet
         }
+        svo::VERIGUILD => veriguild(&mut p, id, shared),
+        svo::GETPROF => getprof(&mut p, id, shared),
+        svo::SETPROF => setprof(&mut p, id, shared),
+        svo::REQUESTLIST => {
+            let Some(player) = p.bytes(2) else {
+                return Step::Quiet;
+            };
+            requestlist(player, p.rest(), id, shared)
+        }
+        svo::REQUESTBUDDIES => {
+            let Some(player) = p.bytes(2) else {
+                return Step::Quiet;
+            };
+            requestbuddies(player, p.rest(), id, shared)
+        }
+        svo::PMPLAYER => {
+            if p.bytes(2).is_none() {
+                return Step::Quiet;
+            }
+            if !pm.allow(Instant::now()) {
+                log!("gserver {id} pmplayer over {PM_PER_SEC} a second, dropped");
+                return Step::Quiet;
+            }
+            pmplayer(p.rest(), id, shared);
+            Step::Quiet
+        }
         _ => {
             log!("gserver {id} unhandled id {pid}: {}", show(p.rest()));
             Step::Quiet
         }
     }
+}
+
+/// One message line: the id, `body`, then a line feed.
+fn message(id: usize, body: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(body.len() + 2);
+    out.push(gchar(id));
+    out.extend_from_slice(body);
+    out.push(b'\n');
+    out
+}
+
+/// `REQUESTTEXT` (19) for one player: their raw GSHORT id, then `text`.
+fn request_text(player: &[u8], text: &[u8]) -> Vec<u8> {
+    message(svi::REQUESTTEXT, &[player, text].concat())
+}
+
+/// `VERIGUILD` (9): may the player wear the guild's tag? Answered only
+/// when they may (design §2).
+fn veriguild(p: &mut Fields, id: u64, shared: &Shared) -> Step {
+    let (Some(player), Some(account), Some(nick), Some(guild)) =
+        (p.bytes(2), p.gstr(), p.gstr(), p.gstr())
+    else {
+        return Step::Quiet;
+    };
+    let cfg = shared.config();
+    let member = cfg.guilds.iter().any(|(g, members)| {
+        g.as_bytes().eq_ignore_ascii_case(guild)
+            && members
+                .iter()
+                .any(|m| m.as_bytes().eq_ignore_ascii_case(account))
+    });
+    log!(
+        "gserver {id} veriguild {} guild {}: {}",
+        show(account),
+        show(guild),
+        if member { "ok" } else { "not a member" }
+    );
+    if !member {
+        return Step::Quiet;
+    }
+    let mut body = player.to_vec();
+    put_gstr(&mut body, &[nick, b" (", guild, b")"].concat());
+    Step::Reply(message(svi::VERIGUILD, &body))
+}
+
+/// `GETPROF` (12): answer `PROFILE` (7), with empty fields for an
+/// account that never set one (design §1).
+fn getprof(p: &mut Fields, id: u64, shared: &Shared) -> Step {
+    let Some(requester) = p.bytes(2) else {
+        return Step::Quiet;
+    };
+    // The client's own packet id, passed through by the gserver.
+    if p.bytes(1).is_none() {
+        return Step::Quiet;
+    }
+    let target = p.rest();
+    let profile = shared.profiles.get(target).unwrap_or_default();
+    log!("gserver {id} getprof {}", show(target));
+    let mut body = requester.to_vec();
+    put_gstr(&mut body, target);
+    for f in &profile {
+        put_gstr(&mut body, f);
+    }
+    Step::Reply(message(svi::PROFILE, &body))
+}
+
+/// `SETPROF` (13): store the nine fields, only for a player on this link.
+fn setprof(p: &mut Fields, id: u64, shared: &Shared) -> Step {
+    if p.bytes(1).is_none() {
+        return Step::Quiet;
+    }
+    let Some(account) = p.gstr() else {
+        return Step::Quiet;
+    };
+    let mut profile: crate::profiles::Profile = Default::default();
+    for f in profile.iter_mut() {
+        *f = p.gstr().unwrap_or_default().to_vec();
+    }
+    if player_on(shared, id, account).is_none() {
+        log!(
+            "gserver {id} setprof {} dropped: not a player on this server",
+            show(account)
+        );
+        return Step::Quiet;
+    }
+    match shared.profiles.set(account, profile) {
+        Ok(()) => log!("gserver {id} setprof {}", show(account)),
+        Err(e) => log!("gserver {id} setprof {}: not saved ({e})", show(account)),
+    }
+    Step::Quiet
+}
+
+/// The player id on link `id` whose account is `account` (ASCII case
+/// ignored).
+fn player_on(shared: &Shared, id: u64, account: &[u8]) -> Option<u16> {
+    let entry = shared.servers.get(id)?;
+    entry
+        .players
+        .iter()
+        .find(|(_, pl)| !pl.account.is_empty() && pl.account.eq_ignore_ascii_case(account))
+        .map(|(&n, _)| n)
+}
+
+/// The account of `player` (a raw GSHORT) on link `id`.
+fn account_of(shared: &Shared, id: u64, player: &[u8]) -> Option<Vec<u8>> {
+    let n = Fields::new(player).gshort()?;
+    let pl = shared.servers.get(id)?.players.get(&n)?.clone();
+    (!pl.account.is_empty()).then_some(pl.account)
+}
+
+/// `REQUESTLIST` (26): a player's text request (design §3, §5, §6).
+fn requestlist(player: &[u8], raw: &[u8], id: u64, shared: &Shared) -> Step {
+    let f = text::split(raw);
+    let field = |n: usize| f.get(n).map(Vec::as_slice).unwrap_or_default();
+    let (weapon, kind, option) = (field(0), field(1), field(2));
+    log!("gserver {id} requestlist {}", show(raw));
+    match kind {
+        b"pmservers" => {
+            let mut out = f.clone();
+            out.extend(shared.servers.public(Some(id)).into_iter().map(|s| s.1));
+            Step::Reply(request_text(player, &text::join(&out)))
+        }
+        b"pmguilds" => {
+            let mut out = f.clone();
+            out.extend(shared.config().guilds.keys().map(|g| g.as_bytes().to_vec()));
+            Step::Reply(request_text(player, &text::join(&out)))
+        }
+        b"pmserverplayers" => {
+            let mut out = vec![weapon.to_vec(), kind.to_vec(), option.to_vec()];
+            let server = shared
+                .servers
+                .public(None)
+                .into_iter()
+                .find(|s| s.1.eq_ignore_ascii_case(option));
+            if let Some(entry) = server.and_then(|s| shared.servers.get(s.0)) {
+                for pl in entry.players.values().filter(|pl| !pl.account.is_empty()) {
+                    out.push(text::join(&[&pl.account, &pl.nickname]));
+                }
+            }
+            Step::Reply(request_text(player, &text::join(&out)))
+        }
+        b"lister" => match option {
+            // GServer-v2 turns the client's `simplelist` into this.
+            b"simplelist" | b"simpleserverlist" => {
+                let mut out = vec![weapon.to_vec(), kind.to_vec(), b"simpleserverlist".to_vec()];
+                for (_, name, level, n) in shared.servers.public(None) {
+                    let tagged = [hq_tag(level), &name].concat();
+                    out.push(text::join(&[&name[..], &tagged, n.to_string().as_bytes()]));
+                }
+                Step::Reply(request_text(player, &text::join(&out)))
+            }
+            b"verifybuddies" | b"addbuddy" | b"deletebuddy" => {
+                buddies(player, weapon, option, &f[3.min(f.len())..], id, shared)
+            }
+            _ => Step::Quiet,
+        },
+        b"irc" => irc(player, &f, id, shared),
+        _ => Step::Quiet,
+    }
+}
+
+/// `lister` buddy options (`crate::buddies` says which parts are seen on
+/// the wire and which are chosen here).
+fn buddies(
+    player: &[u8],
+    weapon: &[u8],
+    option: &[u8],
+    args: &[Vec<u8>],
+    id: u64,
+    shared: &Shared,
+) -> Step {
+    let Some(account) = account_of(shared, id, player) else {
+        log!("gserver {id} {}: player has no account", show(option));
+        return Step::Quiet;
+    };
+    let changed = match option {
+        b"addbuddy" => shared.buddies.add(&account, args),
+        b"deletebuddy" => shared.buddies.remove(&account, args),
+        _ => {
+            // verifybuddies,<load from server 0/1>,<CRC-32 of the list>
+            let load = args.first().is_some_and(|a| a.as_slice() == b"1");
+            let theirs: Option<u32> = args
+                .get(1)
+                .and_then(|c| std::str::from_utf8(c).ok())
+                .and_then(|c| c.trim().parse().ok());
+            let list = shared.buddies.list(&account);
+            let ours = crate::buddies::list_crc(&list);
+            log!(
+                "gserver {id} verifybuddies {} load {load} crc {theirs:?} ours {ours}",
+                show(&account)
+            );
+            if !load || theirs == Some(ours) {
+                return Step::Quiet;
+            }
+            return Step::Reply(request_text(player, &buddylist(weapon, &list)));
+        }
+    };
+    match changed {
+        Ok(list) => log!(
+            "gserver {id} {} {}: {} buddies",
+            show(option),
+            show(&account),
+            list.len()
+        ),
+        Err(e) => log!("gserver {id} {}: not saved ({e})", show(option)),
+    }
+    Step::Quiet
+}
+
+/// `<weapon>,lister,buddylist,acc1,acc2,…`.
+fn buddylist(weapon: &[u8], list: &[Vec<u8>]) -> Vec<u8> {
+    let mut out = vec![weapon.to_vec(), b"lister".to_vec(), b"buddylist".to_vec()];
+    out.extend(list.iter().cloned());
+    text::join(&out)
+}
+
+/// `REQUESTBUDDIES` (28): `account,weapon,type` answered with the
+/// account's buddy list. GServer-v2 never sends it; the layout is the open
+/// listserver's.
+fn requestbuddies(player: &[u8], raw: &[u8], id: u64, shared: &Shared) -> Step {
+    let f = text::split(raw);
+    let (Some(account), Some(weapon)) = (f.first(), f.get(1)) else {
+        return Step::Quiet;
+    };
+    log!("gserver {id} requestbuddies {}", show(account));
+    let list = shared.buddies.list(account);
+    Step::Reply(request_text(player, &buddylist(weapon, &list)))
+}
+
+/// `irc` join, part and privmsg (design §5).
+fn irc(player: &[u8], f: &[Vec<u8>], id: u64, shared: &Shared) -> Step {
+    let field = |n: usize| f.get(n).map(Vec::as_slice).unwrap_or_default();
+    let action = field(2);
+    match action {
+        b"join" | b"part" => {
+            let mut chan = field(3).to_vec();
+            if chan.is_empty() {
+                return Step::Quiet;
+            }
+            if chan[0] != b'#' {
+                chan.insert(0, b'#');
+            }
+            if let Some(n) = Fields::new(player).gshort() {
+                let mut channels = shared.channels.lock().unwrap_or_else(|e| e.into_inner());
+                let set = channels.entry((id, n)).or_default();
+                if action == b"join" {
+                    set.insert(chan.clone());
+                } else {
+                    set.remove(&chan);
+                    if set.is_empty() {
+                        channels.remove(&(id, n));
+                    }
+                }
+            }
+            let out = text::join(&[&b"GraalEngine"[..], b"irc", action, &chan[..]]);
+            Step::Reply(request_text(player, &out))
+        }
+        b"privmsg" if f.len() >= 6 => {
+            let out = text::join(&f[..6]);
+            shared.links.send_others(id, &message(svi::SENDTEXT, &out));
+            Step::Quiet
+        }
+        _ => Step::Quiet,
+    }
+}
+
+/// `PMPLAYER` (29): pass a PM to the named gserver, with field 0 changed to
+/// the sender's server so the reply finds its way back (design §4).
+fn pmplayer(raw: &[u8], id: u64, shared: &Shared) {
+    let mut f = text::split(raw);
+    if f.len() < 7 {
+        log!("gserver {id} pmplayer too short: {}", show(raw));
+        return;
+    }
+    let Some(from) = shared.servers.get(id).and_then(|e| e.name) else {
+        return;
+    };
+    let target = shared.servers.id_by_name(&f[0]);
+    let to_account = f[5].clone();
+    let Some(target) = target.filter(|&t| player_on(shared, t, &to_account).is_some()) else {
+        log!(
+            "gserver {id} pmplayer to {} on {}: no such player",
+            show(&to_account),
+            show(&f[0])
+        );
+        return;
+    };
+    f[0] = from;
+    shared
+        .links
+        .send(target, message(svi::PMPLAYER, &text::join(&f)));
+}
+
+/// `Listserver,Modify,Server,<name>,players=<n>` as a `SENDTEXT` (20).
+fn count_text(name: &[u8], players: i64) -> Vec<u8> {
+    let n = format!("players={players}");
+    message(
+        svi::SENDTEXT,
+        &text::join(&[&b"Listserver"[..], b"Modify", b"Server", name, n.as_bytes()]),
+    )
+}
+
+/// The player counts other gservers were last told, by link id.
+#[derive(Default)]
+pub struct Counts {
+    told: BTreeMap<u64, (Vec<u8>, usize)>,
+}
+
+/// Tell every other gserver about player counts that changed, servers
+/// that appeared and servers that went (`players=-1`). Run about once a
+/// second, so changes are pushed at most once a second (design §5).
+pub fn push_counts(shared: &Shared, counts: &mut Counts) {
+    let now: BTreeMap<u64, (Vec<u8>, usize)> = shared
+        .servers
+        .public(None)
+        .into_iter()
+        .map(|(id, name, _, n)| (id, (name, n)))
+        .collect();
+    for (id, (name, _)) in &counts.told {
+        let same_name = now.get(id).is_some_and(|(n, _)| n == name);
+        if !same_name {
+            shared.links.send_others(*id, &count_text(name, -1));
+        }
+    }
+    for (id, (name, n)) in &now {
+        if counts.told.get(id) != Some(&(name.clone(), *n)) {
+            shared.links.send_others(*id, &count_text(name, *n as i64));
+        }
+    }
+    counts.told = now;
 }
 
 /// The PC id for a login's machine list, from the machines table. `None`

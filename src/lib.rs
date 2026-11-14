@@ -8,12 +8,16 @@
 #[macro_use]
 pub mod log;
 pub mod accounts;
+pub mod buddies;
 pub mod client;
 pub mod config;
 pub mod gserver;
+pub mod links;
 pub mod machines;
+pub mod profiles;
 pub mod server;
 pub mod state;
+pub mod text;
 pub mod wire;
 
 pub use config::Config;

@@ -1,6 +1,7 @@
 //! The listserver's settings, read from a TOML file.
 
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -99,6 +100,16 @@ pub struct Config {
     /// How often to log how many servers and players are listed. 0: off.
     #[serde(default = "default_status_log_secs")]
     pub status_log_secs: u64,
+    /// Player profiles (`GETPROF` / `SETPROF`). Empty: kept in memory
+    /// only. Read at start; a change takes a restart.
+    pub profiles: PathBuf,
+    /// Buddy lists (`verifybuddies`, `addbuddy`, `deletebuddy`). Empty:
+    /// kept in memory only. Read at start; a change takes a restart.
+    pub buddies: PathBuf,
+    /// Global guilds: guild name to member accounts (ASCII case ignored).
+    /// A player may wear a guild's tag only when listed here. Read again
+    /// on reload.
+    pub guilds: BTreeMap<String, Vec<String>>,
 }
 
 fn default_silent_list_after_ms() -> u64 {
@@ -148,6 +159,9 @@ impl Default for Config {
             pcid_ignore_hashes: Vec::new(),
             pcid_match_hashes: default_pcid_match_hashes(),
             status_log_secs: default_status_log_secs(),
+            profiles: PathBuf::new(),
+            buddies: PathBuf::new(),
+            guilds: BTreeMap::new(),
         }
     }
 }
@@ -164,6 +178,8 @@ impl Config {
             &mut cfg.log_file,
             &mut cfg.secure_login_key,
             &mut cfg.machines,
+            &mut cfg.profiles,
+            &mut cfg.buddies,
         ] {
             if !p.as_os_str().is_empty() && p.is_relative() {
                 *p = dir.join(&*p);
@@ -206,6 +222,16 @@ impl Config {
                 return Err(format!(
                     "pcid_ignore_hashes must be MD5 digests of 32 hex digits, not {h:?}"
                 ));
+            }
+        }
+        for (guild, members) in &self.guilds {
+            if guild.is_empty() || guild.contains(['\n', '\r', ',', '"']) {
+                return Err(format!(
+                    "guild names must be one line with no comma or quote, not {guild:?}"
+                ));
+            }
+            if members.iter().any(|m| m.contains(['\n', '\r'])) {
+                return Err(format!("guild {guild:?} has a member name over two lines"));
             }
         }
         for g in &self.gservers {
@@ -275,6 +301,17 @@ mod tests {
         assert_eq!(s.machines, d.machines);
         assert!(s.pcid_ignore_hashes.is_empty());
         assert_eq!(s.pcid_match_hashes, d.pcid_match_hashes);
+        assert_eq!(s.profiles, d.profiles);
+        assert_eq!(s.buddies, d.buddies);
+        assert!(s.guilds.is_empty());
+    }
+
+    #[test]
+    fn guilds_parse_and_bad_names_are_refused() {
+        let c = Config::parse("[guilds]\n\"Staff\" = [\"alice\", \"Bob\"]\n").unwrap();
+        assert_eq!(c.guilds["Staff"], vec!["alice", "Bob"]);
+        assert!(Config::parse("[guilds]\n\"a,b\" = []\n").is_err());
+        assert!(Config::parse("[guilds]\n\"\" = []\n").is_err());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! The registered gservers, and the list and status messages built from them.
 
 use crate::wire::{gchar, put_gstr, GCHAR_MAX};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 /// Listserver to client message ids.
@@ -26,8 +26,18 @@ pub struct Entry {
     pub port: Vec<u8>,
     /// HQ level from `SERVERHQLEVEL`; bronze until the gserver says.
     pub hq_level: usize,
-    /// Player ids on the gserver.
-    pub players: BTreeSet<u16>,
+    /// The players on the gserver, by the gserver's player id.
+    pub players: BTreeMap<u16, Player>,
+}
+
+/// One player on a gserver, from `PLYRADD`. Older gservers send only the
+/// id and type, so account and nickname may be empty.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Player {
+    pub account: Vec<u8>,
+    pub nickname: Vec<u8>,
+    /// The `PLYRADD` type (client, RC, NPC-server...).
+    pub kind: usize,
 }
 
 /// The tag in front of a server name in a tagged list (gen 4, gen 5, RC):
@@ -93,6 +103,41 @@ impl Servers {
             n.eq_ignore_ascii_case(name)
                 .then(|| (n.to_vec(), e.ip.clone(), e.port.clone()))
         })
+    }
+
+    /// A copy of a gserver's entry.
+    pub fn get(&self, id: u64) -> Option<Entry> {
+        self.lock().get(&id).cloned()
+    }
+
+    /// The link id of the named gserver called `name` (ASCII case
+    /// ignored, the first to connect wins), including hidden servers.
+    pub fn id_by_name(&self, name: &[u8]) -> Option<u64> {
+        self.lock().iter().find_map(|(&id, e)| {
+            e.name
+                .as_deref()
+                .is_some_and(|n| n.eq_ignore_ascii_case(name))
+                .then_some(id)
+        })
+    }
+
+    /// Named, non-hidden gservers other than `except`, in the order they
+    /// connected: their link id, name, HQ level and player count. This is
+    /// what other gservers are told about (PM server lists, the simple
+    /// list, player-count pushes).
+    pub fn public(&self, except: Option<u64>) -> Vec<(u64, Vec<u8>, usize, usize)> {
+        self.lock()
+            .iter()
+            .filter(|(&id, e)| Some(id) != except && shown(e, ListFor::Tagged))
+            .map(|(&id, e)| {
+                (
+                    id,
+                    e.name.clone().unwrap_or_default(),
+                    e.hq_level,
+                    e.players.len(),
+                )
+            })
+            .collect()
     }
 
     /// Drop a gserver's entry.
@@ -231,7 +276,7 @@ mod tests {
         s.update(2, |e| {
             e.name = Some(b"World".to_vec());
             e.hq_level = 3;
-            e.players.insert(7);
+            e.players.insert(7, Player::default());
         });
         let parsed = seihai_core::protocol::parse_list_reply(
             &[s.list_message(ListFor::Tagged), b"\n".to_vec()].concat(),
@@ -253,8 +298,8 @@ mod tests {
         s.insert(2);
         s.update(2, |e| {
             e.name = Some(b"World".to_vec());
-            e.players.insert(1);
-            e.players.insert(2);
+            e.players.insert(1, Player::default());
+            e.players.insert(2, Player::default());
         });
         assert_eq!(s.counts(), (1, 2));
         assert_eq!(s.status_line(), "status: 1 server(s), 2 player(s)");
