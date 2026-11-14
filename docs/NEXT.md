@@ -62,6 +62,7 @@ Spec: `docs/design/gserver-text-profiles-guilds.md`. Work is filed as
 issues labelled `cursor`, in the order A → B, C → D, E, F → G, H.
 A to G are built in PR #47. H (#39), the SQLite `data` store for
 profiles and buddies with a one-shot import of the text files, follows it.
-Still open: the real-client lab runs listed in the design doc (a 4.x
-client's buddy tab, a 2.x+ PM-server tab), and moving accounts into the
-store, which is optional and not planned.
+The real-client checks were done on 2026-11-14 with 4.20r8
+(`docs/lab/2026-11-14-buddies-pm-tab-4.20r8.md`), and both shapes held.
+Still open: the same PM-tab check on a 2.x client, and moving accounts
+into the store, which is optional and not planned.

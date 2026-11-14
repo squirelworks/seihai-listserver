@@ -13,8 +13,10 @@
 //! - An open listserver answers with `<weapon>,lister,buddylist,acc1,…`
 //!   (Graal_analysis `client-internals/feature-specs/14-friends-ignore.md`).
 //!
-//! Not yet seen on the wire, so chosen here and to be checked in a lab
-//! run: `addbuddy` / `deletebuddy` carry one or more accounts after the
+//! Checked with a real 4.20r8 (`docs/lab/2026-11-14-buddies-pm-tab-4.20r8.md`):
+//! the client sends one account with `addbuddy` / `deletebuddy` and wants
+//! no answer, and it takes `buddylist` and rewrites its own list to match.
+//! Chosen here before that run, and still how it works: `addbuddy` / `deletebuddy` carry one or more accounts after the
 //! option; the listserver answers `verifybuddies` only when the client
 //! asks to load from the server (flag 1) and its CRC differs from the
 //! stored list's; `addbuddy` / `deletebuddy` change the stored list and
