@@ -158,8 +158,11 @@ Notes:
   players in its PM list as "nick (on server)" with external ids. It sends
   this request itself when a player opens a server in the PM list.
 - Leave out the requesting server in `pmservers`. The reference release does
-  not, but listing yourself gives duplicate entries. **[open]**: confirm
-  this with a real 2.x+ client's PM server tab.
+  not, but listing yourself gives duplicate entries. Checked with a real
+  4.20r8 (`docs/lab/2026-11-14-buddies-pm-tab-4.20r8.md`): the tab shows
+  only the other servers, with no duplicate. The client sends
+  `pmservers` by itself at login, not when the tab opens. Not yet checked
+  on 2.x.
 - `<hq tag>` is `state::hq_tag(level)` (the same `P `, `H `, `U `... tags
   as the list).
 - Hidden servers (HQ level 0) never appear here.
@@ -226,10 +229,14 @@ our reply are unseen. Choices:
   `account,weapon,type`, and answered with `weapon,type,buddylist,…`.
 - Stored in memory and in the `buddies` file when it is set.
 
-Lab check still to do: a real 4.04r2 or 4.20r8 with
-`loadbuddiesfromserver=1` through the fork, with one account's list
-stored here: does the Buddies tab fill from `buddylist`? And what does a
-2.22 or 4.x client send when a buddy is added?
+Lab check done (2026-11-14, real 4.20r8 through the fork,
+`docs/lab/2026-11-14-buddies-pm-tab-4.20r8.md`): the client takes our
+`buddylist`, even mid-session, and rewrites its own list to match. Adding
+or removing a buddy sends `addbuddy,<account>` / `deletebuddy,<account>`
+with one account and expects no answer. `verifybuddies` is sent at every
+login, after a serverwarp, and again when the fork's listserver link
+reconnects. The 4.x client never shows offline buddies. A 2.22 client's
+add is still unseen.
 
 What we know:
 - The fork forwards `X,lister,verifybuddies|addbuddy|deletebuddy,…` from a
