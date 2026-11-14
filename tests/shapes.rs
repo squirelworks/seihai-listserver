@@ -655,3 +655,138 @@ fn serverinfo_answers_a_listed_server_and_ignores_an_unknown_one() {
         .concat()
     );
 }
+
+/// Lines that arrive within `wait`, even when more would follow. A quiet
+/// wait cannot be used while pings repeat inside the timeout.
+fn lines_for(s: &mut TcpStream, wait: Duration) -> Vec<Vec<u8>> {
+    let end = Instant::now() + wait;
+    let mut data = Vec::new();
+    let mut buf = [0u8; 65536];
+    while Instant::now() < end {
+        let left = end.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        s.set_read_timeout(Some(left.min(Duration::from_millis(200))))
+            .unwrap();
+        match s.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => data.extend_from_slice(&buf[..n]),
+            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
+                ) =>
+            {
+                break;
+            }
+            Err(e) => panic!("{e}"),
+        }
+    }
+    let mut out = Vec::new();
+    let mut rest = &data[..];
+    while rest.len() >= 2 {
+        let n = u16::from_be_bytes([rest[0], rest[1]]) as usize;
+        if rest.len() < 2 + n {
+            break;
+        }
+        out.extend(lines(&zlib_decompress(&rest[2..2 + n]).unwrap()));
+        rest = &rest[2 + n..];
+    }
+    out
+}
+
+fn start_ping(
+    secs: u64,
+    gservers: Vec<seihai_listserver::config::GserverAllow>,
+) -> (Running, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let run = seihai_listserver::start(Config {
+        gserver_port: 0,
+        client_ports: vec![0],
+        secure_login_key: dir.path().join("seihai-login.key"),
+        machines: PathBuf::new(),
+        gserver_ping_secs: secs,
+        gservers,
+        status_log_secs: 0,
+        ..Config::default()
+    })
+    .unwrap();
+    (run, dir)
+}
+
+#[test]
+fn enrolled_gserver_is_sent_an_empty_ping_on_a_repeat() {
+    let (run, _dir) = start_ping(1, Vec::new());
+    let mut g = TcpStream::connect(run.gserver_addr).unwrap();
+    register_line(&mut g);
+    let got = lines_for(&mut g, Duration::from_secs(4));
+    let pings: Vec<_> = got.iter().filter(|l| l[0] == gchar(99)).collect();
+    assert!(
+        pings.len() >= 2,
+        "an enrolled link is pinged again on the next interval: {got:?}"
+    );
+    assert!(
+        pings.iter().all(|l| l.len() == 1),
+        "the ping is id 99 and nothing else: {pings:?}"
+    );
+}
+
+#[test]
+fn a_pong_is_not_answered_with_another_ping() {
+    let (run, _dir) = start_ping(30, Vec::new());
+    let mut g = TcpStream::connect(run.gserver_addr).unwrap();
+    register_line(&mut g);
+    let veri = [
+        vec![gchar(17)],
+        gstr(b"acct"),
+        gstr(b"pw"),
+        vec![gchar(0), gchar(2), gchar(5)],
+    ]
+    .concat();
+    send_lines(&mut g, &[veri, vec![gchar(16)], vec![gchar(16)]]);
+    let got = lines_for(&mut g, Duration::from_millis(800));
+    assert!(
+        got.iter()
+            .any(|l| l[0] == gchar(11) && l.ends_with(b"SUCCESS")),
+        "the account check was read: {got:?}"
+    );
+    assert!(
+        got.iter().all(|l| l[0] != gchar(99)),
+        "id 16 does not draw an id 99: {got:?}"
+    );
+}
+
+#[test]
+fn a_ping_waits_until_the_hq_password_is_accepted() {
+    let (run, _dir) = start_ping(1, vec![allow("127.0.0.1", "lab-hq")]);
+    let mut g = TcpStream::connect(run.gserver_addr).unwrap();
+    register_line(&mut g);
+    let early = lines_for(&mut g, Duration::from_millis(1500));
+    assert!(
+        early.is_empty(),
+        "a link waiting on the hq password is not pinged: {early:?}"
+    );
+    send_lines(&mut g, &[hq_line(b"lab-hq")]);
+    let later = lines_for(&mut g, Duration::from_secs(3));
+    let pings: Vec<_> = later.iter().filter(|l| l[0] == gchar(99)).collect();
+    assert!(
+        !pings.is_empty(),
+        "the ping starts once the password matches: {later:?}"
+    );
+    assert!(pings.iter().all(|l| l.len() == 1), "{pings:?}");
+}
+
+#[test]
+fn gserver_ping_can_be_turned_off() {
+    let (run, _dir) = start_ping(0, Vec::new());
+    let mut g = TcpStream::connect(run.gserver_addr).unwrap();
+    register_line(&mut g);
+    send_lines(&mut g, &[vec![gchar(16)]]);
+    let got = lines_for(&mut g, Duration::from_millis(1500));
+    assert!(
+        got.is_empty(),
+        "gserver_ping_secs = 0 sends nothing, and a pong draws nothing: {got:?}"
+    );
+}

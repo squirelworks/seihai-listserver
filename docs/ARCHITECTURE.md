@@ -98,3 +98,9 @@ the link is the classic one inside `seclogin::Channel` records
 (`Duplex` + `Channel::wrap`). `session` runs the same loop either way.
 `require_secure_gserver_link` refuses plain links. Tests:
 `tests/secure_gserver_link.rs`.
+
+Enrolled links (open mode at once, or after `SERVERHQPASS` when the
+allow-list is set) are sent an empty ping, id 99, every
+`gserver_ping_secs`. Id 16 from the gserver is its pong and is not
+answered. `tests/shapes.rs` covers the empty ping, a pong that draws no
+reply, the allow-list gate, and the off setting.

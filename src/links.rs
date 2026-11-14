@@ -125,6 +125,14 @@ impl Links {
         outbox.is_some_and(|o| o.send(lines))
     }
 
+    /// Queue `lines` to every enrolled link.
+    pub fn send_all(&self, lines: &[u8]) {
+        let targets: Vec<Outbox> = self.lock().values().cloned().collect();
+        for o in targets {
+            o.send(lines.to_vec());
+        }
+    }
+
     /// Queue `lines` to every link except `except`.
     pub fn send_others(&self, except: u64, lines: &[u8]) {
         let targets: Vec<Outbox> = self

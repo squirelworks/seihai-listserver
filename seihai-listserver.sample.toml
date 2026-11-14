@@ -46,6 +46,11 @@ max_connections = 256
 client_timeout_secs = 30
 gserver_timeout_secs = 300
 
+# Empty ping (id 99) to each enrolled gserver, this often, in seconds.
+# The gserver's empty pong (id 16) is not answered, so the two cannot loop.
+# A link still waiting on its HQ password is not enrolled. 0: off.
+gserver_ping_secs = 60
+
 # Real 1.41 rev 1 connects and waits for the list. After this many
 # milliseconds with no byte, send the shape A reply (id 0 list, id 2
 # status). 0: off. A client that speaks first is never answered early.

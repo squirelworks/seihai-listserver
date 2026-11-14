@@ -80,3 +80,11 @@ separates that native run from synthetic-peer tests and the remaining 2.x questi
   use the accounts file; the `data` store covers profiles and buddies.
 - The separate February 2000 Graal3D host needs no listserver work;
   `docs/PLAN.md` distinguishes it from the Torque-era HQ level 4 tag.
+
+## Gserver ping
+
+Done: an enrolled gserver link is sent an empty ping (id 99) every
+`gserver_ping_secs` (default 60, 0 off). A link waiting on its HQ
+password is not enrolled. The gserver's empty pong (id 16) is not
+answered, so the two ids cannot loop. Loopback tests in `tests/shapes.rs`.
+No real client: the packet stays between this listserver and a gserver.
