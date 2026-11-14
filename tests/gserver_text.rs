@@ -361,3 +361,103 @@ fn buddies_are_stored_and_sent_when_the_clients_crc_differs() {
     )]);
     assert_eq!(a.request_text(3), "-Buddies,lister,buddylist,bob");
 }
+
+/// A listserver with the `data` store, keeping the text-file settings so
+/// the one-shot import can be seen.
+fn lab_with_data(dir: &std::path::Path) -> Running {
+    seihai_listserver::start(Config {
+        gserver_port: 0,
+        client_ports: vec![0],
+        secure_login_key: dir.join("seihai-login.key"),
+        machines: Default::default(),
+        profiles: dir.join("profiles.tsv"),
+        buddies: dir.join("buddies.tsv"),
+        data: dir.join("data.sqlite"),
+        ..Config::default()
+    })
+    .unwrap()
+}
+
+fn setprof(account: &[u8], fields: &[&[u8]]) -> Vec<u8> {
+    let mut body = vec![b'x'];
+    body.extend(gstr(account));
+    for f in fields {
+        body.extend(gstr(f));
+    }
+    line(13, &body)
+}
+
+fn getprof(gs: &mut Gs, pid: u16, account: &[u8]) -> Vec<u8> {
+    gs.send(&[line(12, &[&gshort(pid)[..], b"x", account].concat())]);
+    let p = gs.wait_for(7, WAIT).expect("PROFILE");
+    assert_eq!(&p[1..3], &gshort(pid));
+    p[3..].to_vec()
+}
+
+#[test]
+fn profiles_and_buddies_in_the_data_store_survive_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    // Text files from before `data` was set: imported once at start.
+    std::fs::write(
+        dir.path().join("profiles.tsv"),
+        b"carol\tCarol\t30\tf\tDE\t\t\t\tPub\told\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("buddies.tsv"), b"alice\tcarol\n").unwrap();
+
+    let fields: Vec<&[u8]> = vec![b"Alice", b"20", b"f", b"NL", b"", b"", b"", b"Onnet", b"hi"];
+    {
+        let run = lab_with_data(dir.path());
+        let (mut a, mut b) = two(&run);
+        // The imported profile and buddy list are there.
+        let mut want = gstr(b"carol");
+        for f in [
+            &b"Carol"[..],
+            b"30",
+            b"f",
+            b"DE",
+            b"",
+            b"",
+            b"",
+            b"Pub",
+            b"old",
+        ] {
+            want.extend(gstr(f));
+        }
+        assert_eq!(getprof(&mut b, 4, b"carol"), want);
+        a.requestlist(3, b"GraalEngine,lister,verifybuddies,1,0");
+        assert_eq!(a.request_text(3), "GraalEngine,lister,buddylist,carol");
+
+        // Changes made on this run.
+        a.send(&[setprof(b"alice", &fields)]);
+        a.requestlist(3, b"GraalEngine,lister,addbuddy,bob");
+        a.requestlist(3, b"GraalEngine,lister,deletebuddy,carol");
+        std::thread::sleep(Duration::from_millis(200));
+        a.requestlist(3, b"GraalEngine,lister,verifybuddies,1,0");
+        assert_eq!(a.request_text(3), "GraalEngine,lister,buddylist,bob");
+    }
+
+    // The text files are no longer written once `data` is set.
+    assert_eq!(
+        std::fs::read(dir.path().join("buddies.tsv")).unwrap(),
+        b"alice\tcarol\n"
+    );
+    // Change the old file: a second start must not import it again.
+    std::fs::write(dir.path().join("buddies.tsv"), b"alice\tmallory\n").unwrap();
+
+    // A second listserver on the same data file: what the first stored.
+    let run = lab_with_data(dir.path());
+    let (mut a, mut b) = two(&run);
+    let mut want = gstr(b"ALICE");
+    for f in &fields {
+        want.extend(gstr(f));
+    }
+    assert_eq!(getprof(&mut b, 4, b"ALICE"), want);
+    a.requestlist(3, b"GraalEngine,lister,verifybuddies,1,0");
+    assert_eq!(a.request_text(3), "GraalEngine,lister,buddylist,bob");
+    a.send(&[line(
+        28,
+        &[&gshort(3)[..], b"alice,-Buddies,lister"].concat(),
+    )]);
+    assert_eq!(a.request_text(3), "-Buddies,lister,buddylist,bob");
+}

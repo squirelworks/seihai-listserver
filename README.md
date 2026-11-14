@@ -123,7 +123,8 @@ profiles (`GETPROF`, `SETPROF`, saved to `profiles`), global guilds
 tabs and the simple list (`REQUESTLIST`), cross-server PMs (`PMPLAYER`),
 channel chat (`irc`), player counts pushed to the other gservers, and
 buddy lists (`verifybuddies`, `addbuddy`, `deletebuddy`, `REQUESTBUDDIES`,
-saved to `buddies`).
+saved to `buddies`). With the `data` setting, profiles and buddy lists are
+kept in one SQLite file instead, and the old text files are imported once.
 When a `VERIACC2` that gets in carries a 4.x to 6.03 client's machine
 digests, `SVI_ASSIGNPCID` (30) with the machine's PC id goes out just
 before the `SUCCESS` answer; see [`docs/pcid.md`](docs/pcid.md). A

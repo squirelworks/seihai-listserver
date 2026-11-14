@@ -114,6 +114,13 @@ profiles = ""
 # a restart.
 buddies = ""
 
+# One SQLite file for profiles and buddy lists, written a change at a time.
+# Empty: the two settings above work as written. When set, a profiles or
+# buddies text file that exists is imported into it once, and is not used
+# after. A relative path is taken from this file's folder. A change takes a
+# restart.
+data = ""
+
 # Global guilds. A player whose nickname ends in "(guild)" keeps the tag
 # only when the account is listed under that guild here (case is ignored).
 # Read again on reload. Example:

@@ -17,6 +17,7 @@ pub mod machines;
 pub mod profiles;
 pub mod server;
 pub mod state;
+pub mod store;
 pub mod text;
 pub mod wire;
 

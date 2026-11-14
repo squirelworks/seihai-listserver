@@ -106,6 +106,11 @@ pub struct Config {
     /// Buddy lists (`verifybuddies`, `addbuddy`, `deletebuddy`). Empty:
     /// kept in memory only. Read at start; a change takes a restart.
     pub buddies: PathBuf,
+    /// The SQLite data file for profiles and buddy lists (`src/store.rs`).
+    /// Empty: the `profiles` and `buddies` settings work as before. When
+    /// set, a `profiles` or `buddies` text file is imported into it once and
+    /// not used after. Read at start; a change takes a restart.
+    pub data: PathBuf,
     /// Global guilds: guild name to member accounts (ASCII case ignored).
     /// A player may wear a guild's tag only when listed here. Read again
     /// on reload.
@@ -161,6 +166,7 @@ impl Default for Config {
             status_log_secs: default_status_log_secs(),
             profiles: PathBuf::new(),
             buddies: PathBuf::new(),
+            data: PathBuf::new(),
             guilds: BTreeMap::new(),
         }
     }
@@ -180,6 +186,7 @@ impl Config {
             &mut cfg.machines,
             &mut cfg.profiles,
             &mut cfg.buddies,
+            &mut cfg.data,
         ] {
             if !p.as_os_str().is_empty() && p.is_relative() {
                 *p = dir.join(&*p);
@@ -303,6 +310,7 @@ mod tests {
         assert_eq!(s.pcid_match_hashes, d.pcid_match_hashes);
         assert_eq!(s.profiles, d.profiles);
         assert_eq!(s.buddies, d.buddies);
+        assert_eq!(s.data, d.data);
         assert!(s.guilds.is_empty());
     }
 

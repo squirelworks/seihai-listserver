@@ -59,5 +59,9 @@ where the code goes.
 ## Gserver text, profiles, guilds, PMs, buddies (2026-11-13)
 
 Spec: `docs/design/gserver-text-profiles-guilds.md`. Work is filed as
-issues labelled `cursor`, in the order A → B, C → D, E, F → G, H. Nothing
-is implemented yet.
+issues labelled `cursor`, in the order A → B, C → D, E, F → G, H.
+A to G are built in PR #47. H (#39), the SQLite `data` store for
+profiles and buddies with a one-shot import of the text files, follows it.
+Still open: the real-client lab runs listed in the design doc (a 4.x
+client's buddy tab, a 2.x+ PM-server tab), and moving accounts into the
+store, which is optional and not planned.
