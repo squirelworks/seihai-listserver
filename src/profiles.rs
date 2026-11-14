@@ -5,11 +5,15 @@
 //! account per line: the account, then the nine fields, separated by tabs,
 //! with `\`, tab and line breaks escaped. Accounts are matched without
 //! ASCII case.
+//!
+//! With the `data` setting the profiles live in the SQLite store instead
+//! (`crate::store`), and the text file is only read once, to import it.
 
+use crate::store::{Source, Store};
 use crate::wire::GCHAR_MAX;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// The profile fields, in wire order: name, age, sex, country, messenger,
 /// email, url, hangout, quote.
@@ -20,19 +24,49 @@ pub type Profile = [Vec<u8>; FIELDS];
 
 /// The profile store.
 pub struct Profiles {
-    path: Option<PathBuf>,
+    backing: Backing,
     map: Mutex<BTreeMap<Vec<u8>, Profile>>,
+}
+
+/// Where changes are written.
+enum Backing {
+    Memory,
+    File(PathBuf),
+    Data(Arc<Store>),
 }
 
 fn key(account: &[u8]) -> Vec<u8> {
     account.to_ascii_lowercase()
 }
 
+/// Read a profiles text file. A missing file is empty.
+fn read_file(path: &Path) -> Result<BTreeMap<Vec<u8>, Profile>, String> {
+    let mut map = BTreeMap::new();
+    match std::fs::read(path) {
+        Ok(data) => {
+            for line in data.split(|&b| b == b'\n').filter(|l| !l.is_empty()) {
+                let mut parts = line.split(|&b| b == b'\t').map(unescape);
+                let Some(account) = parts.next() else {
+                    continue;
+                };
+                let mut p: Profile = Default::default();
+                for f in p.iter_mut() {
+                    *f = parts.next().unwrap_or_default();
+                }
+                map.insert(key(&account), p);
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    }
+    Ok(map)
+}
+
 impl Profiles {
     /// Memory only.
     pub fn memory() -> Self {
         Self {
-            path: None,
+            backing: Backing::Memory,
             map: Mutex::new(BTreeMap::new()),
         }
     }
@@ -43,28 +77,39 @@ impl Profiles {
         if path.as_os_str().is_empty() {
             return Ok(Self::memory());
         }
-        let mut map = BTreeMap::new();
-        match std::fs::read(path) {
-            Ok(data) => {
-                for line in data.split(|&b| b == b'\n').filter(|l| !l.is_empty()) {
-                    let mut parts = line.split(|&b| b == b'\t').map(unescape);
-                    let Some(account) = parts.next() else {
-                        continue;
-                    };
-                    let mut p: Profile = Default::default();
-                    for f in p.iter_mut() {
-                        *f = parts.next().unwrap_or_default();
-                    }
-                    map.insert(key(&account), p);
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("{}: {e}", path.display())),
-        }
         Ok(Self {
-            path: Some(path.to_path_buf()),
-            map: Mutex::new(map),
+            backing: Backing::File(path.to_path_buf()),
+            map: Mutex::new(read_file(path)?),
         })
+    }
+
+    /// Keep profiles in the `data` store. When `file` (the `profiles`
+    /// setting) is not empty and was never imported into this store, its
+    /// rows are copied in first. Returns the store and how many accounts
+    /// were imported.
+    pub fn with_store(store: Arc<Store>, file: &Path) -> Result<(Self, Option<usize>), String> {
+        let mut imported = None;
+        if !file.as_os_str().is_empty() && !store.imported(Source::Profiles)? {
+            imported = store.import_profiles(file, &read_file(file)?)?;
+        }
+        let map = store.profiles()?;
+        Ok((
+            Self {
+                backing: Backing::Data(store),
+                map: Mutex::new(map),
+            },
+            imported,
+        ))
+    }
+
+    /// How many accounts have a profile.
+    pub fn len(&self) -> usize {
+        self.lock().len()
+    }
+
+    /// `true` when no profile is stored.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// The account's profile, if one was ever set.
@@ -79,10 +124,20 @@ impl Profiles {
             f.truncate(GCHAR_MAX);
         }
         let mut map = self.lock();
-        map.insert(key(account), p);
-        let Some(path) = &self.path else {
-            return Ok(());
+        let k = key(account);
+        let path = match &self.backing {
+            Backing::Memory => {
+                map.insert(k, p);
+                return Ok(());
+            }
+            Backing::Data(store) => {
+                let r = store.put_profile(&k, &p);
+                map.insert(k, p);
+                return r;
+            }
+            Backing::File(path) => path,
         };
+        map.insert(k, p);
         let mut out = Vec::new();
         for (account, p) in map.iter() {
             out.extend(escape(account));

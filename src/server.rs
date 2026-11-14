@@ -7,6 +7,7 @@ use crate::links::Links;
 use crate::machines::Machines;
 use crate::profiles::Profiles;
 use crate::state::Servers;
+use crate::store::Store;
 use seihai_core::protocol::seclogin::{self, ServerIdentity};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -143,6 +144,16 @@ impl Shared {
             cfg.gserver_port = old.gserver_port;
             cfg.client_ports.clone_from(&old.client_ports);
         }
+        for (key, new, old) in [
+            ("profiles", &mut cfg.profiles, &old.profiles),
+            ("buddies", &mut cfg.buddies, &old.buddies),
+            ("data", &mut cfg.data, &old.data),
+        ] {
+            if new != old {
+                log!("reload: {key} stays {} until a restart", old.display());
+                new.clone_from(old);
+            }
+        }
         if cfg.machines != old.machines {
             log!(
                 "reload: machines stays {} until a restart",
@@ -278,13 +289,7 @@ pub fn start_at(config: Config, config_path: Option<PathBuf>) -> Result<Running,
         );
         Some(m)
     };
-    let profiles = Profiles::open(&config.profiles)?;
-    if config.profiles.as_os_str().is_empty() {
-        log!("profiles: in memory");
-    } else {
-        log!("profiles: {}", config.profiles.display());
-    }
-    let buddies = Buddies::open(&config.buddies)?;
+    let (profiles, buddies) = open_profiles_and_buddies(&config)?;
     let bind = |port: u16| {
         TcpListener::bind((config.bind.as_str(), port))
             .map_err(|e| format!("cannot listen on {}:{port}: {e}", config.bind))
@@ -483,6 +488,44 @@ fn is_fatal(e: &io::Error) -> bool {
             | io::ErrorKind::ConnectionReset
             | io::ErrorKind::Interrupted
     )
+}
+
+/// Profiles and buddy lists: in the `data` store when it is set, otherwise
+/// in their own text files or in memory.
+fn open_profiles_and_buddies(config: &Config) -> Result<(Profiles, Buddies), String> {
+    if config.data.as_os_str().is_empty() {
+        let profiles = Profiles::open(&config.profiles)?;
+        let buddies = Buddies::open(&config.buddies)?;
+        for (what, path) in [("profiles", &config.profiles), ("buddies", &config.buddies)] {
+            if path.as_os_str().is_empty() {
+                log!("{what}: in memory");
+            } else {
+                log!("{what}: {}", path.display());
+            }
+        }
+        return Ok((profiles, buddies));
+    }
+    let store = Arc::new(Store::open(&config.data)?);
+    let (profiles, p_in) = Profiles::with_store(Arc::clone(&store), &config.profiles)?;
+    let (buddies, b_in) = Buddies::with_store(store, &config.buddies)?;
+    for (what, file, n) in [
+        ("profiles", &config.profiles, p_in),
+        ("buddies", &config.buddies, b_in),
+    ] {
+        if let Some(n) = n {
+            log!(
+                "data: imported {n} {what} from {} (once; that file is no longer used)",
+                file.display()
+            );
+        }
+    }
+    log!(
+        "data: {} ({} profiles, {} buddy lists)",
+        config.data.display(),
+        profiles.len(),
+        buddies.len()
+    );
+    Ok((profiles, buddies))
 }
 
 #[cfg(test)]

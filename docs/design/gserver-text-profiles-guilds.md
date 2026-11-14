@@ -249,6 +249,20 @@ the shape if the client wants something else.
 
 ## 7. Persistent store (issue H)
 
+**Built (2026-11-14) for profiles and buddies, in `src/store.rs`.** The
+`data` setting names one SQLite file (`rusqlite`, `bundled`, WAL). Empty
+keeps the text files / memory as before. When set, the listserver still
+answers from memory, loaded at start, and writes each change to the
+database in its own small transaction. A `profiles` or `buddies` text file
+that exists is imported the first time only (recorded in an `imports`
+table; a row already in the database wins), and is not read or written
+after. Accounts stay in the accounts file, unchanged; moving them is left
+out (seihai-listserver's own choice: `add-account` and the hot-reloaded
+file already work). The schema version is in `PRAGMA user_version`; a
+newer file is refused.
+
+Original plan:
+
 Accounts already use argon2id from the accounts file. Profiles (B) and
 buddies (G) need writes. Move them, and optionally accounts, into SQLite
 (`rusqlite` with the `bundled` feature) behind one `store` module, with a

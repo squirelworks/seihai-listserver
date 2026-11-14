@@ -19,11 +19,15 @@
 //! asks to load from the server (flag 1) and its CRC differs from the
 //! stored list's; `addbuddy` / `deletebuddy` change the stored list and
 //! answer nothing (the client has already changed its own).
+//!
+//! With the `data` setting the lists live in the SQLite store instead
+//! (`crate::store`), and the text file is only read once, to import it.
 
+use crate::store::{Source, Store};
 use crate::wire::GCHAR_MAX;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Most buddies kept for one account.
 pub const MAX_BUDDIES: usize = 100;
@@ -31,18 +35,49 @@ pub const MAX_BUDDIES: usize = 100;
 /// The buddy store: account (lower case) to its buddies, in the order they
 /// were added, as the player wrote them.
 pub struct Buddies {
-    path: Option<PathBuf>,
+    backing: Backing,
     map: Mutex<BTreeMap<Vec<u8>, Vec<Vec<u8>>>>,
+}
+
+/// Where changes are written.
+enum Backing {
+    Memory,
+    File(PathBuf),
+    Data(Arc<Store>),
 }
 
 fn key(account: &[u8]) -> Vec<u8> {
     account.to_ascii_lowercase()
 }
 
+/// Read a buddies text file. A missing file is empty.
+fn read_file(path: &Path) -> Result<BTreeMap<Vec<u8>, Vec<Vec<u8>>>, String> {
+    let mut map = BTreeMap::new();
+    match std::fs::read(path) {
+        Ok(data) => {
+            for line in data.split(|&b| b == b'\n').filter(|l| !l.is_empty()) {
+                let mut parts = line.split(|&b| b == b'\t');
+                let Some(account) = parts.next() else {
+                    continue;
+                };
+                let list: Vec<Vec<u8>> = parts
+                    .filter(|p| !p.is_empty())
+                    .take(MAX_BUDDIES)
+                    .map(<[u8]>::to_vec)
+                    .collect();
+                map.insert(key(account), list);
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    }
+    Ok(map)
+}
+
 impl Buddies {
     pub fn memory() -> Self {
         Self {
-            path: None,
+            backing: Backing::Memory,
             map: Mutex::new(BTreeMap::new()),
         }
     }
@@ -54,29 +89,39 @@ impl Buddies {
         if path.as_os_str().is_empty() {
             return Ok(Self::memory());
         }
-        let mut map = BTreeMap::new();
-        match std::fs::read(path) {
-            Ok(data) => {
-                for line in data.split(|&b| b == b'\n').filter(|l| !l.is_empty()) {
-                    let mut parts = line.split(|&b| b == b'\t');
-                    let Some(account) = parts.next() else {
-                        continue;
-                    };
-                    let list: Vec<Vec<u8>> = parts
-                        .filter(|p| !p.is_empty())
-                        .take(MAX_BUDDIES)
-                        .map(<[u8]>::to_vec)
-                        .collect();
-                    map.insert(key(account), list);
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("{}: {e}", path.display())),
-        }
         Ok(Self {
-            path: Some(path.to_path_buf()),
-            map: Mutex::new(map),
+            backing: Backing::File(path.to_path_buf()),
+            map: Mutex::new(read_file(path)?),
         })
+    }
+
+    /// Keep buddy lists in the `data` store. When `file` (the `buddies`
+    /// setting) is not empty and was never imported into this store, its
+    /// lists are copied in first. Returns the store and how many accounts
+    /// were imported.
+    pub fn with_store(store: Arc<Store>, file: &Path) -> Result<(Self, Option<usize>), String> {
+        let mut imported = None;
+        if !file.as_os_str().is_empty() && !store.imported(Source::Buddies)? {
+            imported = store.import_buddies(file, &read_file(file)?)?;
+        }
+        let map = store.buddies()?;
+        Ok((
+            Self {
+                backing: Backing::Data(store),
+                map: Mutex::new(map),
+            },
+            imported,
+        ))
+    }
+
+    /// How many accounts have a buddy list.
+    pub fn len(&self) -> usize {
+        self.lock().len()
+    }
+
+    /// `true` when no account has a list.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// The account's buddies.
@@ -112,13 +157,21 @@ impl Buddies {
         f: impl FnOnce(&mut Vec<Vec<u8>>),
     ) -> Result<Vec<Vec<u8>>, String> {
         let mut map = self.lock();
-        let list = map.entry(key(account)).or_default();
+        let k = key(account);
+        let list = map.entry(k.clone()).or_default();
+        let before = list.clone();
         f(list);
         let now = list.clone();
         if now.is_empty() {
-            map.remove(&key(account));
+            map.remove(&k);
         }
-        if let Some(path) = &self.path {
+        if now == before {
+            return Ok(now);
+        }
+        if let Backing::Data(store) = &self.backing {
+            store.put_buddies(&k, &now)?;
+        }
+        if let Backing::File(path) = &self.backing {
             let mut out = Vec::new();
             for (account, list) in map.iter() {
                 out.extend_from_slice(account);
