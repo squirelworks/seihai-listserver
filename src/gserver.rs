@@ -4,8 +4,10 @@
 //! A gserver first sends `SVO_REGISTERV3` as one uncompressed line, then
 //! zlib frames (`u16be` length + zlib body of lines). The listserver
 //! answers `VERIACC2` with `SVI_VERIACC2`, and `SERVERINFO` (a server warp
-//! request for one player) with `SVI_SERVERINFO`. The entry is dropped when
-//! the link closes or stays silent past `gserver_timeout_secs`.
+//! request for one player) with `SVI_SERVERINFO`. An enrolled link is sent
+//! an empty ping (id 99) every `gserver_ping_secs`. The gserver's pong is
+//! id 16 and is not answered, so the two cannot loop. The entry is dropped
+//! when the link closes or stays silent past `gserver_timeout_secs`.
 //!
 //! A Seihai gserver may instead open with the encrypted link (Seihai's
 //! `documentation/secure-login.md`, "Gserver to listserver link"): C1 with
@@ -69,6 +71,9 @@ pub mod svi {
     pub const SENDTEXT: usize = 20;
     pub const PMPLAYER: usize = 29;
     pub const ASSIGNPCID: usize = 30;
+    /// Empty liveness check. The gserver answers with [`svo::PING`] and
+    /// nothing else; this id is never sent in reply to that pong.
+    pub const PING: usize = 99;
 }
 
 /// Cross-server PMs one link may send in a second; more are dropped.
@@ -549,7 +554,8 @@ fn handle(
             out.push(b'\n');
             Step::Reply(out)
         }
-        // Keep-alive and pong: nothing to answer.
+        // SETIP is the gserver's own keep-alive. Id 16 is its pong to
+        // our ping (99). Neither is answered: a 99 in reply to 16 would loop.
         svo::SETIP | svo::PING => Step::Quiet,
         svo::SENDTEXT => {
             log!("gserver {id} sendtext {}", show(p.rest()));
@@ -916,6 +922,16 @@ pub fn push_counts(shared: &Shared, counts: &mut Counts) {
         }
     }
     counts.told = now;
+}
+
+/// One empty ping (id 99) to every enrolled gserver. A link still waiting
+/// on its HQ password is not enrolled, so it is not pinged. The gserver's
+/// pong is not what schedules the next one.
+pub fn push_pings(shared: &Shared) {
+    if shared.config().gserver_ping_secs == 0 {
+        return;
+    }
+    shared.links.send_all(&message(svi::PING, b""));
 }
 
 /// The PC id for a login's machine list, from the machines table. `None`

@@ -59,6 +59,11 @@ pub struct Config {
     /// Seconds a gserver link may stay silent before its entry is dropped.
     /// GServer-v2 beta4 sends a keep-alive every 60 s.
     pub gserver_timeout_secs: u64,
+    /// How often, in seconds, to send an empty ping (id 99) to each
+    /// enrolled gserver. The gserver answers with an empty pong (id 16),
+    /// which is not answered. 0: off.
+    #[serde(default = "default_gserver_ping_secs")]
+    pub gserver_ping_secs: u64,
     /// The Seihai secure login (`SEI00001`, Seihai's
     /// `documentation/secure-login.md`): the file with this listserver's
     /// Ed25519 key, created on first start. Empty: secure logins are refused.
@@ -137,6 +142,10 @@ fn default_status_log_secs() -> u64 {
     300
 }
 
+fn default_gserver_ping_secs() -> u64 {
+    60
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -153,6 +162,7 @@ impl Default for Config {
             max_connections: 256,
             client_timeout_secs: 30,
             gserver_timeout_secs: 300,
+            gserver_ping_secs: default_gserver_ping_secs(),
             secure_login_key: PathBuf::from("seihai-login.key"),
             require_secure_login: false,
             require_secure_gserver_link: false,
@@ -305,6 +315,7 @@ mod tests {
         assert_eq!(s.login_fail_limit, d.login_fail_limit);
         assert_eq!(s.login_fail_window_secs, d.login_fail_window_secs);
         assert_eq!(s.status_log_secs, d.status_log_secs);
+        assert_eq!(s.gserver_ping_secs, d.gserver_ping_secs);
         assert_eq!(s.machines, d.machines);
         assert!(s.pcid_ignore_hashes.is_empty());
         assert_eq!(s.pcid_match_hashes, d.pcid_match_hashes);
@@ -349,6 +360,7 @@ mod tests {
         assert_eq!(c.login_fail_limit, default_login_fail_limit());
         assert_eq!(c.login_fail_window_secs, default_login_fail_window_secs());
         assert_eq!(c.status_log_secs, default_status_log_secs());
+        assert_eq!(c.gserver_ping_secs, default_gserver_ping_secs());
     }
 
     #[test]

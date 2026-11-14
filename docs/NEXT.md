@@ -66,6 +66,8 @@ Spec: `docs/design/gserver-text-profiles-guilds.md`. A to G (issues
 profiles and buddies with a one-shot import of the text files, landed in #48.
 The real-client checks were done on 2026-11-14 with 4.20r8
 (`docs/lab/2026-11-14-buddies-pm-tab-4.20r8.md`), and both shapes held.
+The design's [coverage summary](design/gserver-text-profiles-guilds.md#implementation-and-evidence-coverage)
+separates that native run from synthetic-peer tests and the remaining 2.x questions.
 
 ## Remaining work and limits
 
@@ -78,3 +80,11 @@ The real-client checks were done on 2026-11-14 with 4.20r8
   use the accounts file; the `data` store covers profiles and buddies.
 - The separate February 2000 Graal3D host needs no listserver work;
   `docs/PLAN.md` distinguishes it from the Torque-era HQ level 4 tag.
+
+## Gserver ping
+
+Done: an enrolled gserver link is sent an empty ping (id 99) every
+`gserver_ping_secs` (default 60, 0 off). A link waiting on its HQ
+password is not enrolled. The gserver's empty pong (id 16) is not
+answered, so the two ids cannot loop. Loopback tests in `tests/shapes.rs`.
+No real client: the packet stays between this listserver and a gserver.

@@ -353,6 +353,11 @@ pub fn start_at(config: Config, config_path: Option<PathBuf>) -> Result<Running,
             cfg.silent_list_after_ms
         );
     }
+    if cfg.gserver_ping_secs == 0 {
+        log!("gserver ping: off");
+    } else {
+        log!("gserver ping: every {}s", cfg.gserver_ping_secs);
+    }
 
     arm_reload(&reload_flag);
     spawn_housekeeping(Arc::clone(&shared));
@@ -381,6 +386,7 @@ fn spawn_housekeeping(shared: Arc<Shared>) {
             let mut seen = path.as_deref().and_then(mtime);
             let mut last_status = Instant::now();
             let mut last_counts = Instant::now();
+            let mut last_ping = Instant::now();
             let mut counts = crate::gserver::Counts::default();
             loop {
                 std::thread::sleep(Duration::from_millis(200));
@@ -413,6 +419,11 @@ fn spawn_housekeeping(shared: Arc<Shared>) {
                 if last_counts.elapsed() >= Duration::from_secs(1) {
                     crate::gserver::push_counts(&shared, &mut counts);
                     last_counts = Instant::now();
+                }
+                let ping_secs = shared.config().gserver_ping_secs;
+                if ping_secs > 0 && last_ping.elapsed() >= Duration::from_secs(ping_secs) {
+                    crate::gserver::push_pings(&shared);
+                    last_ping = Instant::now();
                 }
                 let secs = shared.config().status_log_secs;
                 if secs > 0 && last_status.elapsed() >= Duration::from_secs(secs) {

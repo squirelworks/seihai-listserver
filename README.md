@@ -129,7 +129,9 @@ When a `VERIACC2` that gets in carries a 4.x to 6.03 client's machine
 digests, `SVI_ASSIGNPCID` (30) with the machine's PC id goes out just
 before the `SUCCESS` answer; see [`docs/pcid.md`](docs/pcid.md). A
 gserver's entry is dropped when its link closes or is silent for
-`gserver_timeout_secs`.
+`gserver_timeout_secs`. Each enrolled gserver is sent an empty ping
+(id 99) every `gserver_ping_secs` (60 by default, 0 off). Its empty pong
+(id 16) is not answered.
 
 ### Which tab a lab server shows under
 
