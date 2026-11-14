@@ -1,13 +1,32 @@
 # Gserver link: profiles, guilds, cross-server text, PMs and buddies
 
-Status: **A to G are implemented** (`src/gserver.rs`, `src/links.rs`,
-`src/profiles.rs`, `src/buddies.rs`, `src/text.rs`; tests in
-`tests/gserver_text.rs`), against fake gservers on loopback. No real
-client or the fork has been run against them yet; the lab runs below are
-still to do. H (SQLite) is not started. The work was split into
-issues labelled `cursor` (see "Issues" at the end). Each section gives the
-wire layout, what the listserver should do, what the gserver does with the
-answer, and how sure we are of it.
+Status (2026-11-15): **A to G landed in #47; H (SQLite profiles and
+buddies) landed in #48.** The sections below retain the original design
+and choices, with implementation and evidence limits distinguished here.
+
+## Implementation and evidence coverage
+
+- **Implementation:** `src/gserver.rs`, `src/links.rs`, `src/profiles.rs`,
+  `src/buddies.rs` and `src/text.rs` implement A to G. `src/store.rs` and
+  the profile/buddy adapters implement H. Accounts remain in their existing
+  file; moving them into SQLite is optional and not planned.
+- **Synthetic peers:** `tests/gserver_text.rs` checks profiles, guilds,
+  PM lists/delivery, channels, counts and buddy behavior against authored
+  gservers on loopback. Its SQLite test checks import and storage across
+  reopen. These tests establish server behavior, not native-client acceptance.
+- **Native 4.20r8 through the fork:** the
+  [2026-11-14 lab record](../lab/2026-11-14-buddies-pm-tab-4.20r8.md)
+  checks buddy synchronization, add/delete requests, persistence across a
+  listserver restart and the PM server/player tab. The recorded listserver
+  was at `c37d5b4`, after #47 and #48. This is the existing run published
+  in #49, not a new run or native validation of every feature in A to H.
+- **Still unverified:** the same PM-tab behavior on 2.x, and a 2.22
+  client's buddy-add request. The 4.20r8 result does not establish either.
+
+Each section gives the wire layout, intended listserver behavior, the
+gserver's use of the answer, and its source confidence. Historical plans
+below do not reopen completed implementation work; current remaining work
+is in [NEXT](../NEXT.md#remaining-work-and-limits) and roadmap #20.
 
 ## Where this comes from
 
@@ -18,9 +37,10 @@ answer, and how sure we are of it.
 - **A third-party .NET listserver release** (2026-11 review, in the project's
   private notes). It was read only as behaviour: which ids it answers and
   with what fields. None of its code is in this repo, and none may be added.
-- **Seihai's own lobby notes** (`seihai-core` `protocol/lobby.rs`). They
-  record what real 2.x+ clients send (`GraalEngine,pmguilds,""`,
-  `GraalEngine,pmservers,""`).
+- **Seihai's own lobby notes** (`seihai-core` `protocol/lobby.rs`). The
+  after-login observations there are for real 4.04r2 and 4.20r8 clients
+  (`GraalEngine,pmguilds,""`, `GraalEngine,pmservers,""`); they do not
+  establish a 2.x client's request trigger or reply handling.
 
 Confidence tags used below:
 - **[fork]**: the layout matches what the fork sends and parses. That is
@@ -208,7 +228,7 @@ one push per server a second.
 `Listserver,SetRemoteIp,<ip>` toward a gserver (it tells the gserver its
 public IP) is a possible extra and is not in scope here.
 
-## 6. Buddies (issue G) [open]
+## 6. Buddies (issue G; 4.20r8 checked, 2.x questions remain)
 
 **Built (2026-11-13), with the open parts chosen as below and marked in
 `src/buddies.rs`.** Buddies are a real Graal feature, not a Seihai idea:
@@ -216,8 +236,8 @@ the 2.x player list has a Buddies section, 4.04r2 and 4.20r8 send
 `verifybuddies` at every login (the live 4.04 login sent
 `GraalEngine,lister,verifybuddies,1,0`), GServer-v2 forwards the three
 options to the listserver, and an open listserver answers with
-`buddylist`. Only the add/delete arguments and the client's handling of
-our reply are unseen. Choices:
+`buddylist`. The 4.20r8 run below checks its add/delete arguments and reply
+handling; those observations must not be generalized to 2.x. Choices:
 - `addbuddy` / `deletebuddy` take one or more accounts after the option,
   change the sender's stored list (at most 100, case ignored, no commas),
   and answer nothing.
@@ -244,10 +264,10 @@ What we know:
 - `REQUESTBUDDIES` (28) is defined, and the reference release answers it:
   the request text is `account,weapon,type`, and the answer is `REQUESTTEXT`
   with `weapon,type,buddylist,acc1,acc2,…`. Our fork never sends 28.
-- What a real client expects back for `verifybuddies` / `addbuddy` is **not
-  captured**.
+- The recorded 4.20r8 client accepts the `buddylist` reply and expects no
+  add/delete answer. Equivalent 2.x behavior remains unverified here.
 
-Plan: store buddy lists per account (account to a set of accounts, at most
+Original plan (implemented; the recorded lab is above): store buddy lists per account (account to a set of accounts, at most
 100). On `addbuddy,<acc>` / `deletebuddy,<acc>` update the list for the
 sender's account, which you look up with issue A. Answer
 `verifybuddies` and `REQUESTBUDDIES` with the `buddylist` shape above. Before

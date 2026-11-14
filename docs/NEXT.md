@@ -66,6 +66,8 @@ Spec: `docs/design/gserver-text-profiles-guilds.md`. A to G (issues
 profiles and buddies with a one-shot import of the text files, landed in #48.
 The real-client checks were done on 2026-11-14 with 4.20r8
 (`docs/lab/2026-11-14-buddies-pm-tab-4.20r8.md`), and both shapes held.
+The design's [coverage summary](design/gserver-text-profiles-guilds.md#implementation-and-evidence-coverage)
+separates that native run from synthetic-peer tests and the remaining 2.x questions.
 
 ## Remaining work and limits
 
