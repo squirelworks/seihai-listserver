@@ -160,13 +160,9 @@ impl Buddies {
     ) -> Result<Vec<Vec<u8>>, String> {
         let mut map = self.lock();
         let k = key(account);
-        let list = map.entry(k.clone()).or_default();
-        let before = list.clone();
-        f(list);
-        let now = list.clone();
-        if now.is_empty() {
-            map.remove(&k);
-        }
+        let before = map.get(&k).cloned().unwrap_or_default();
+        let mut now = before.clone();
+        f(&mut now);
         if now == before {
             return Ok(now);
         }
@@ -174,8 +170,14 @@ impl Buddies {
             store.put_buddies(&k, &now)?;
         }
         if let Backing::File(path) = &self.backing {
+            let mut candidate = map.clone();
+            if now.is_empty() {
+                candidate.remove(&k);
+            } else {
+                candidate.insert(k.clone(), now.clone());
+            }
             let mut out = Vec::new();
-            for (account, list) in map.iter() {
+            for (account, list) in &candidate {
                 out.extend_from_slice(account);
                 for b in list {
                     out.push(b'\t');
@@ -187,6 +189,13 @@ impl Buddies {
             std::fs::write(&tmp, &out)
                 .and_then(|()| std::fs::rename(&tmp, path))
                 .map_err(|e| format!("{}: {e}", path.display()))?;
+        }
+        // Failed persistence must leave memory at the last saved state,
+        // so an identical retry cannot be mistaken for a saved no-op.
+        if now.is_empty() {
+            map.remove(&k);
+        } else {
+            map.insert(k, now.clone());
         }
         Ok(now)
     }
@@ -270,5 +279,78 @@ mod tests {
         let s = Buddies::memory();
         let many: Vec<Vec<u8>> = (0..150).map(|n| format!("p{n}").into_bytes()).collect();
         assert_eq!(s.add(b"me", &many).unwrap().len(), MAX_BUDDIES);
+    }
+
+    fn change_for_test(s: &Buddies, remove: bool) -> Result<Vec<Vec<u8>>, String> {
+        if remove {
+            s.remove(b"me", &[b"alice".to_vec()])
+        } else {
+            s.add(b"me", &[b"bob".to_vec()])
+        }
+    }
+
+    fn expected(remove: bool) -> Vec<Vec<u8>> {
+        if remove {
+            vec![]
+        } else {
+            vec![b"alice".to_vec(), b"bob".to_vec()]
+        }
+    }
+
+    #[test]
+    fn file_write_failures_preserve_memory_and_allow_retry_after_restart() {
+        for remove in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("buddies.tsv");
+            let s = Buddies::open(&path).unwrap();
+            let original = s.add(b"me", &[b"alice".to_vec()]).unwrap();
+            // A directory at the temporary-file path makes the write
+            // fail without depending on platform permission semantics.
+            let blocker = path.with_extension("tmp");
+            std::fs::create_dir(&blocker).unwrap();
+            assert!(change_for_test(&s, remove).is_err());
+            assert_eq!(s.list(b"me"), original);
+            assert_eq!(Buddies::open(&path).unwrap().list(b"me"), original);
+            std::fs::remove_dir(&blocker).unwrap();
+            assert_eq!(change_for_test(&s, remove).unwrap(), expected(remove));
+            drop(s);
+            assert_eq!(Buddies::open(&path).unwrap().list(b"me"), expected(remove));
+        }
+    }
+
+    #[test]
+    fn sqlite_write_failures_preserve_memory_and_allow_retry_after_restart() {
+        for remove in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("data.sqlite");
+            let store = Arc::new(Store::open(&path).unwrap());
+            let (s, _) = Buddies::with_store(store, Path::new("")).unwrap();
+            let original = s.add(b"me", &[b"alice".to_vec()]).unwrap();
+            let control = rusqlite::Connection::open(&path).unwrap();
+            let operation = if remove { "DELETE" } else { "INSERT" };
+            control
+                .execute_batch(&format!(
+                    "CREATE TRIGGER fail_buddies BEFORE {operation} ON buddies
+                 BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;"
+                ))
+                .unwrap();
+            assert!(change_for_test(&s, remove).is_err());
+            assert_eq!(s.list(b"me"), original);
+            assert_eq!(
+                Store::open(&path)
+                    .unwrap()
+                    .buddies()
+                    .unwrap()
+                    .get(&key(b"me")),
+                Some(&original)
+            );
+            control.execute_batch("DROP TRIGGER fail_buddies").unwrap();
+            assert_eq!(change_for_test(&s, remove).unwrap(), expected(remove));
+            drop(control);
+            drop(s);
+            let (reopened, _) =
+                Buddies::with_store(Arc::new(Store::open(&path).unwrap()), Path::new("")).unwrap();
+            assert_eq!(reopened.list(b"me"), expected(remove));
+        }
     }
 }
