@@ -17,10 +17,16 @@ What is done and what is next is in `docs/PLAN.md` and `docs/NEXT.md`.
 | `src/state.rs` | `Servers` (the gserver table, in connect order, behind one mutex), the id 0 list and id 2 status builders, HQ tags. HQ level 0 is listed only for the RC list. |
 | `src/accounts.rs` | `Accounts::Open` or a file of argon2id hashes, read again when its mtime changes; `add_account`. `FailLimit` caps failed client logins and failed `VERIACC2` checks per address. |
 | `src/machines.rs` | The machines table for PC ids: splits the client's machine list, keeps the hardware digests, matches `pcid_match_hashes` of them to a known machine or makes one, and appends to the `machines` file. See `docs/pcid.md`. |
+| `src/links.rs` | Bounded gserver outboxes and one writer per link; serializes replies and cross-server pushes, with plain and encrypted sinks. |
+| `src/text.rs` | Comma-tokenized byte fields, quoting and nested lists used by gserver text requests. |
+| `src/profiles.rs` | Nine profile fields per account, ASCII case-insensitive lookup; memory, text-file or SQLite backing. |
+| `src/buddies.rs` | Ordered buddy lists, case-insensitive changes, size cap and CRC used by `verifybuddies`; memory, text-file or SQLite backing. |
+| `src/store.rs` | SQLite profile/buddy tables, schema version and one-shot text imports. Accounts remain in their existing file. |
 | `src/wire.rs` | GCHAR/GSTRING/GSHORT, the `u16be` frame, `show()` for safe log text. |
 | `src/log.rs` | `log!`: timestamped lines to stderr and the optional `log_file`. |
 
-From `seihai-core` (git tag in `Cargo.toml`) it uses only
+From `seihai-core` (git tag in `Cargo.toml`) it uses secure-login/channel
+helpers in `protocol::seclogin`, framing helpers
 `protocol::{zlib_*, bz2_*, Gen5, Gen5Comp, write_zlib_frame}`, and in tests
 `net::Connection::fetch_server_list` (Seihai's own list client) and
 `protocol::parse_list_reply`.
@@ -38,7 +44,7 @@ client --login frame--> client.rs --account--> accounts.rs
 ## Choices and why
 
 - **Threads, not async.** A listserver has few, short links. Blocking
-  `std::net` with read timeouts keeps it small and dependency-free. If it
+  `std::net` with read timeouts avoids an async runtime. If it
   ever needs thousands of links, swap `server.rs` for tokio; the handlers
   only need `Read`/`Write`.
 - **One mutex for the table.** Every operation is a small map change or a
@@ -65,6 +71,11 @@ client --login frame--> client.rs --account--> accounts.rs
 - `tests/shapes.rs`: the Python lab tests, on free loopback ports.
 - `tests/seihai_client.rs`: Seihai's list client for 2.05, 2.17, 2.22, 2.31, 3.04.
 - `tests/secure_login.rs`: the Seihai secure login (`SEI00001`): right and wrong password, wrong key, trust on first use, `require_secure_login`, a tampered seal; the RC list (id 5) over the same handshake, with hidden servers, a wrong password, the classic RC refused under `require_secure_login`, and the rate limit.
+- `tests/gserver_text.rs`: profiles, guilds, PM lists and delivery, channels,
+  count pushes, buddy CRC behavior and SQLite import/storage across reopen.
+  Real 4.20r8 buddy and PM-tab evidence is in
+  `docs/lab/2026-11-14-buddies-pm-tab-4.20r8.md`; 2.x PM-tab validation
+  is still open.
 - `tests/pcid.rs`: `ASSIGNPCID` before `VERIACC2`, with graal-client-repro's made-up machine fields; none for old clients or refused logins.
 - `tests/rest.rs`: shape S, the login-failure cap, config reload.
 - `key-fingerprint` is covered by a library test: it prints the public key and fingerprint, and a missing file is an error.
