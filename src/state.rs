@@ -185,13 +185,28 @@ impl Servers {
     ///
     /// A named gserver with HQ level 0 is left out unless `who` is the RC
     /// list. Tags are applied for [`ListFor::Tagged`] and [`ListFor::Rc`].
+    ///
+    /// The wire count is a GCHAR, so at most [`GCHAR_MAX`] rows go out. When
+    /// more servers are listed, the ones with the most players are kept (name
+    /// order breaks ties) and a log line records the truncation.
     pub fn list_message(&self, who: ListFor) -> Vec<u8> {
         let entries = self.lock();
-        let rows: Vec<&Entry> = entries
-            .values()
-            .filter(|e| shown(e, who))
-            .take(GCHAR_MAX)
-            .collect();
+        let mut rows: Vec<&Entry> = entries.values().filter(|e| shown(e, who)).collect();
+        let total = rows.len();
+        if total > GCHAR_MAX {
+            rows.sort_by(|a, b| {
+                b.players.len().cmp(&a.players.len()).then_with(|| {
+                    a.name
+                        .as_deref()
+                        .unwrap_or_default()
+                        .cmp(b.name.as_deref().unwrap_or_default())
+                })
+            });
+            rows.truncate(GCHAR_MAX);
+            log!(
+                "list: {total} servers for {who:?}, sending the {GCHAR_MAX} with the most players (GCHAR count limit)"
+            );
+        }
         let mut out = vec![gchar(plo::SVRLIST), gchar(rows.len())];
         for e in rows {
             let mut name = if who == ListFor::Plain {
@@ -356,5 +371,41 @@ mod tests {
                 "{who:?} is not tagged U"
             );
         }
+    }
+
+    /// More than [`GCHAR_MAX`] listed servers: the wire count cannot carry
+    /// them all, so the densest stay and the rest are omitted.
+    #[test]
+    fn list_keeps_the_densest_servers_when_past_gchar_max() {
+        let s = Servers::default();
+        for i in 0..=GCHAR_MAX {
+            let id = (i + 1) as u64;
+            s.insert(id);
+            s.update(id, |e| {
+                e.name = Some(format!("W{i:04}").into_bytes());
+                e.hq_level = 2;
+                // Later ids have more players, so they should win the cut.
+                for p in 0..=i {
+                    e.players.insert(p as u16, Player::default());
+                }
+            });
+        }
+        assert_eq!(s.listed_for(ListFor::Plain), GCHAR_MAX + 1);
+        let parsed = seihai_core::protocol::parse_list_reply(
+            &[s.list_message(ListFor::Plain), b"\n".to_vec()].concat(),
+        );
+        assert_eq!(parsed.servers.len(), GCHAR_MAX);
+        let names: Vec<&str> = parsed.servers.iter().map(|r| r.name.as_str()).collect();
+        assert!(!names.contains(&"W0000"), "the empty server is dropped");
+        let densest = format!("W{GCHAR_MAX:04}");
+        assert!(
+            names.iter().any(|n| *n == densest),
+            "the densest server stays"
+        );
+        assert_eq!(
+            parsed.servers[0].players,
+            Some((GCHAR_MAX + 1) as u16),
+            "rows are ordered densest first when truncated"
+        );
     }
 }
