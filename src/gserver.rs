@@ -79,6 +79,16 @@ pub mod svi {
 /// Cross-server PMs one link may send in a second; more are dropped.
 const PM_PER_SEC: u32 = 20;
 
+/// How many other servers' player counts a newly listed gserver is told
+/// about at once. The rest arrive through the periodic [`push_counts`].
+/// Without a cap, a register storm queues O(n) frames into one outbox and
+/// O(n²) across the suite (hard-stress LS-002).
+const JOIN_COUNT_CAP: usize = 128;
+
+/// Most count-change notifications one [`push_counts`] tick may queue.
+/// Leftovers stay untold so the next tick continues.
+const COUNT_PUSH_PER_TICK: usize = 256;
+
 /// The `PLYRADD` prop ids read for the player's account and nickname.
 const PROP_NICKNAME: usize = 0;
 const PROP_ACCOUNTNAME: usize = 34;
@@ -394,8 +404,18 @@ fn handle(
             });
             if first {
                 // Tell the new gserver how many players the others have;
-                // later changes come from `push_counts`.
-                for (_, name, _, n) in shared.servers.public(Some(id)) {
+                // later changes come from `push_counts`. Cap the snapshot so
+                // a register storm cannot fill every outbox with O(n) frames.
+                let mut others = shared.servers.public(Some(id));
+                let total = others.len();
+                prefer_dense_counts(&mut others);
+                if total > JOIN_COUNT_CAP {
+                    others.truncate(JOIN_COUNT_CAP);
+                    log!(
+                        "gserver {id}: join count snapshot capped at {JOIN_COUNT_CAP} of {total} public servers"
+                    );
+                }
+                for (_, name, _, n) in others {
                     shared.links.send(id, count_text(&name, n as i64));
                 }
             }
@@ -903,6 +923,10 @@ pub struct Counts {
 /// Tell every other gserver about player counts that changed, servers
 /// that appeared and servers that went (`players=-1`). Run about once a
 /// second, so changes are pushed at most once a second (design §5).
+///
+/// At most [`COUNT_PUSH_PER_TICK`] notifications are queued per tick so a
+/// register storm cannot explode every outbox with O(n²) frames. Untold
+/// changes stay in [`Counts`] and are retried on the next tick.
 pub fn push_counts(shared: &Shared, counts: &mut Counts) {
     let now: BTreeMap<u64, (Vec<u8>, usize)> = shared
         .servers
@@ -910,18 +934,37 @@ pub fn push_counts(shared: &Shared, counts: &mut Counts) {
         .into_iter()
         .map(|(id, name, _, n)| (id, (name, n)))
         .collect();
+    let mut budget = COUNT_PUSH_PER_TICK;
+    let mut next = counts.told.clone();
+
     for (id, (name, _)) in &counts.told {
+        if budget == 0 {
+            break;
+        }
         let same_name = now.get(id).is_some_and(|(n, _)| n == name);
         if !same_name {
             shared.links.send_others(*id, &count_text(name, -1));
+            next.remove(id);
+            budget -= 1;
         }
     }
     for (id, (name, n)) in &now {
-        if counts.told.get(id) != Some(&(name.clone(), *n)) {
-            shared.links.send_others(*id, &count_text(name, *n as i64));
+        if next.get(id) == Some(&(name.clone(), *n)) {
+            continue;
         }
+        if budget == 0 {
+            break;
+        }
+        shared.links.send_others(*id, &count_text(name, *n as i64));
+        next.insert(*id, (name.clone(), *n));
+        budget -= 1;
     }
-    counts.told = now;
+    counts.told = next;
+}
+
+/// Densest public servers first (name order breaks ties), for join snapshots.
+fn prefer_dense_counts(rows: &mut [(u64, Vec<u8>, usize, usize)]) {
+    rows.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| a.1.cmp(&b.1)));
 }
 
 /// One empty ping (id 99) to every enrolled gserver. A link still waiting
@@ -1023,5 +1066,35 @@ mod tests {
             warp_text(b"A, \"B\"", b"127.0.0.1", b"14802"),
             b"0,\"A, \"\"B\"\"\",127.0.0.1,14802"
         );
+    }
+
+    #[test]
+    fn join_count_snapshot_keeps_the_densest_under_the_cap() {
+        let mut rows: Vec<(u64, Vec<u8>, usize, usize)> = (0..JOIN_COUNT_CAP + 40)
+            .map(|i| {
+                (
+                    i as u64,
+                    format!("W{i:04}").into_bytes(),
+                    2,
+                    i, // denser as i grows
+                )
+            })
+            .collect();
+        prefer_dense_counts(&mut rows);
+        rows.truncate(JOIN_COUNT_CAP);
+        assert_eq!(rows.len(), JOIN_COUNT_CAP);
+        assert_eq!(rows[0].3, JOIN_COUNT_CAP + 39);
+        assert_eq!(rows.last().unwrap().3, 40);
+        assert!(rows.iter().all(|r| r.3 >= 40));
+    }
+
+    #[test]
+    fn count_push_budget_is_below_a_full_outbox() {
+        // One tick must not be able to fill a 1024-deep outbox by itself
+        // when every update is fan-out; the per-tick cap is the brake.
+        const {
+            assert!(COUNT_PUSH_PER_TICK < 1024);
+            assert!(JOIN_COUNT_CAP <= COUNT_PUSH_PER_TICK);
+        }
     }
 }
