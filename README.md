@@ -116,6 +116,14 @@ the connect dialog dials the game server directly (Graal_analysis
 | 2.22, 2.31, 3.x (gen 5) | id 7 key + token + list name, then id 1 | two gen-5 zlib frames: id 0; id 2, id 3 site URL, id 5 upgrade URL |
 | RC (gen 5) | id 5 key + token, then id 1 | as gen 5, and hidden servers |
 
+Shape S matches the real 1.41 rev 1 **game** client: it opens the list
+socket and never sends a frame, so the listserver must speak first
+(`silent_list_after_ms`). That is a client-required lab/Seihai
+accommodation; whether a 2001-era production listserver used the same
+delay is unobserved. See Graal_analysis
+`protocol/listserver-141r1-silent-list.md` (and `protocol/listserver.md`).
+RC 1.41 is a different program and does send a list login.
+
 gen 4 and gen 5 lists carry the HQ level tag (`H ` bronze, none for
 classic, `P ` gold, `3 ` G3D). HQ level 0 is hidden: that gserver appears
 only on the RC list (client id 5), tagged `U `, and is left off the other
