@@ -102,6 +102,11 @@ skipped with a warning; add those accounts again with `add-account`.
 
 ## What it speaks
 
+**1.39 and earlier are out of scope.** Those clients have no listserver path:
+the connect dialog dials the game server directly (Graal_analysis
+`client-internals/how-139-gets-online.md`). This listserver starts at
+**1.41 rev 1**.
+
 | Client | Sends | Gets |
 |---|---|---|
 | 1.41 rev 1 (shape S) | nothing, when `silent_list_after_ms` is set | the shape A reply |
