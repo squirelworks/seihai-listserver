@@ -139,6 +139,44 @@ fn silent_wait_off_sends_nothing() {
     assert!(!closed);
 }
 
+/// A one-byte length header must not hold a `max_connections` slot for the
+/// full idle timeout (hard-stress LS-003).
+#[test]
+fn a_partial_first_frame_frees_its_slot_at_the_handshake_timeout() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = Config {
+        gserver_port: 0,
+        client_ports: vec![0],
+        secure_login_key: dir.path().join("seihai-login.key"),
+        silent_list_after_ms: 0,
+        max_connections: 1,
+        client_timeout_secs: 30,
+        client_handshake_timeout_secs: 1,
+        status_log_secs: 0,
+        ..Config::default()
+    };
+    let run = start(cfg).unwrap();
+    let addr = run.client_addrs[0];
+    let mut stuck = TcpStream::connect(addr).unwrap();
+    stuck.write_all(&[0x00]).unwrap();
+    // While the partial frame is held, a second link is refused at accept.
+    std::thread::sleep(Duration::from_millis(100));
+    let mut mid = TcpStream::connect(addr).unwrap();
+    mid.set_read_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
+    let mid_closed = matches!(mid.read(&mut [0u8; 1]), Ok(0) | Err(_));
+    assert!(
+        mid_closed,
+        "with max_connections = 1 the second link should not stay up while the first is incomplete"
+    );
+    // After the handshake timeout the stuck link is dropped and a clean
+    // shape A login gets in well before the 30 s idle timeout.
+    std::thread::sleep(Duration::from_millis(1200));
+    let got = shape_a(addr);
+    assert_eq!(ids(&got), vec![0, 2]);
+    let _ = stuck;
+}
+
 #[test]
 fn a_client_that_speaks_is_not_answered_twice() {
     let dir = tempfile::tempdir().unwrap();

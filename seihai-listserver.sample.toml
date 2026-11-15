@@ -44,6 +44,10 @@ gserver_ip = "peer"
 # Most links open at once, and how long a silent link stays open (seconds).
 max_connections = 256
 client_timeout_secs = 30
+# How long the first client frame may take. A partial length header would
+# otherwise hold a max_connections slot for the full client_timeout_secs.
+# 0: same as client_timeout_secs.
+client_handshake_timeout_secs = 5
 gserver_timeout_secs = 300
 
 # Empty ping (id 99) to each enrolled gserver, this often, in seconds.

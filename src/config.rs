@@ -56,6 +56,12 @@ pub struct Config {
     pub max_connections: usize,
     /// Seconds a client link may stay silent before it is closed.
     pub client_timeout_secs: u64,
+    /// Seconds allowed to finish the first client frame after the link
+    /// opens (or after the first byte, when shape S is watching). A partial
+    /// length header otherwise held a `max_connections` slot for the full
+    /// [`Self::client_timeout_secs`]. 0: same as `client_timeout_secs`.
+    #[serde(default = "default_client_handshake_timeout_secs")]
+    pub client_handshake_timeout_secs: u64,
     /// Seconds a gserver link may stay silent before its entry is dropped.
     /// GServer-v2 beta4 sends a keep-alive every 60 s.
     pub gserver_timeout_secs: u64,
@@ -146,6 +152,10 @@ fn default_gserver_ping_secs() -> u64 {
     60
 }
 
+fn default_client_handshake_timeout_secs() -> u64 {
+    5
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -161,6 +171,7 @@ impl Default for Config {
             gserver_ip: GserverIp::Peer,
             max_connections: 256,
             client_timeout_secs: 30,
+            client_handshake_timeout_secs: default_client_handshake_timeout_secs(),
             gserver_timeout_secs: 300,
             gserver_ping_secs: default_gserver_ping_secs(),
             secure_login_key: PathBuf::from("seihai-login.key"),
@@ -269,6 +280,16 @@ impl Config {
         Duration::from_secs(self.client_timeout_secs.max(1))
     }
 
+    /// How long the first client frame may take. Never longer than
+    /// [`Self::client_timeout`].
+    pub fn client_handshake_timeout(&self) -> Duration {
+        let full = self.client_timeout();
+        if self.client_handshake_timeout_secs == 0 {
+            return full;
+        }
+        Duration::from_secs(self.client_handshake_timeout_secs).min(full)
+    }
+
     pub fn gserver_timeout(&self) -> Duration {
         Duration::from_secs(self.gserver_timeout_secs.max(1))
     }
@@ -307,6 +328,11 @@ mod tests {
         assert_eq!(s.accounts, d.accounts);
         assert_eq!(s.gserver_ip, d.gserver_ip);
         assert_eq!(s.max_connections, d.max_connections);
+        assert_eq!(s.client_timeout_secs, d.client_timeout_secs);
+        assert_eq!(
+            s.client_handshake_timeout_secs,
+            d.client_handshake_timeout_secs
+        );
         assert_eq!(s.secure_login_key, d.secure_login_key);
         assert_eq!(s.require_secure_login, d.require_secure_login);
         assert_eq!(s.require_secure_gserver_link, d.require_secure_gserver_link);

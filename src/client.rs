@@ -129,7 +129,8 @@ pub fn serve(stream: TcpStream, id: u64, port: u16, shared: &Shared) {
 
 fn run(stream: TcpStream, id: u64, shared: &Shared, peer: Option<IpAddr>) -> io::Result<()> {
     let timeout = shared.config().client_timeout();
-    stream.set_read_timeout(Some(timeout))?;
+    let handshake = shared.config().client_handshake_timeout();
+    stream.set_read_timeout(Some(handshake))?;
     let mut writer = stream.try_clone()?;
     let mut reader = BufReader::new(stream);
     let mut coding = Coding::Plain;
@@ -150,15 +151,26 @@ fn run(stream: TcpStream, id: u64, shared: &Shared, peer: Option<IpAddr>) -> io:
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
             Err(e) => return Err(e),
         }
-        reader.get_ref().set_read_timeout(Some(timeout))?;
+        // After the first byte (or a silent list), still finish the first
+        // frame under the handshake budget, not the long idle timeout.
+        reader.get_ref().set_read_timeout(Some(handshake))?;
     }
 
+    let mut first_frame = true;
     loop {
         let body = match wire::read_frame(&mut reader) {
             Ok(b) => b,
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
+            Err(e) if first_frame && is_timeout(&e) => {
+                log!("client {id} handshake timed out waiting for the first frame");
+                return Ok(());
+            }
             Err(e) => return Err(e),
         };
+        if first_frame {
+            first_frame = false;
+            reader.get_ref().set_read_timeout(Some(timeout))?;
+        }
         let raw = match coding.decode(body) {
             Ok(r) => r,
             Err(e) => {
@@ -247,6 +259,13 @@ pub const NEED_SECURE: &[u8] = b"This listserver needs the Seihai secure login."
 /// Error text for a secure login when it is turned off.
 pub const SECURE_OFF: &[u8] = b"Secure login is turned off on this listserver.";
 
+fn is_timeout(e: &io::Error) -> bool {
+    matches!(
+        e.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    )
+}
+
 /// `Ok(false)` when `wait` passes with nothing to read (shape S).
 fn first_byte_ready(stream: &TcpStream, wait: Duration) -> io::Result<bool> {
     stream.set_read_timeout(Some(wait))?;
@@ -261,9 +280,7 @@ fn first_byte_ready(stream: &TcpStream, wait: Duration) -> io::Result<bool> {
             }
             Ok(_) => return Ok(true),
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e)
-                if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock =>
-            {
+            Err(e) if is_timeout(&e) => {
                 return Ok(false);
             }
             Err(e) => return Err(e),
