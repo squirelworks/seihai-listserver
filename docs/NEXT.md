@@ -91,3 +91,5 @@ Done: an enrolled gserver link is sent an empty ping (id 99) every
 password is not enrolled. The gserver's empty pong (id 16) is not
 answered, so the two ids cannot loop. Loopback tests in `tests/shapes.rs`.
 No real client: the packet stays between this listserver and a gserver.
+
+- Done (docs, 2026-11-16): README documents shape S as a client-required silent-list accommodation (Graal_analysis listserver-141r1-silent-list); 2001 timing unobserved. No code change.
