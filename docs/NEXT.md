@@ -71,6 +71,9 @@ separates that native run from synthetic-peer tests and the remaining 2.x questi
 
 ## Remaining work and limits
 
+- Done (docs, 2026-11-16): README states that **1.39 and earlier are out of
+  scope** (no listserver path; Graal_analysis
+  `client-internals/how-139-gets-online.md`). No code change.
 - The PM-tab check on a 2.x client remains unverified; the 4.20r8 result
   above does not establish it. The design note also leaves a 2.22 client's
   buddy-add request unseen.
