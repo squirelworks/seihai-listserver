@@ -84,16 +84,19 @@ tag `v0.0.6` at that stage, and the `key-fingerprint` command.
 The secure RC list (id 5) landed in #22 and was checked with seihai-rc
 on loopback (`docs/lab/2026-11-12-secure-rc-list.md`).
 
-## Current follow-through (2026-11-14)
+## Current follow-through (2026-11-16)
 
 The original port and secure RC follow-up are complete. `Cargo.toml`
-now pins `seihai-core` from its own repository at tag `v0.4.0`
-(was `v0.1.0`, #43).
+pins `seihai-core` from its own repository at tag `v0.4.0` (#56).
 PC ids landed in #46; gserver text, profiles, guilds, cross-server PMs,
 channels and buddies in #47; optional SQLite profile/buddy storage in #48.
 The 4.20r8 buddy and PM-tab checks are recorded in #49. That lab did not
-cover the same PM tab on 2.x clients.
+cover the same PM tab on 2.x clients. Later main also has gserver ping
+(#54), the 1.39-out-of-scope and shape-S notes (#57, #58), densest-row
+list truncate (#59), join-count caps (#60) and an incomplete first-frame
+handshake timeout (#61).
 
-`docs/NEXT.md` and roadmap issue #20 track remaining evidence and limits.
-These main-branch additions do not imply inclusion in the published
-`v0.1.1` tag, which points to the earlier release-notes commit `fa062f4`.
+`docs/NEXT.md` and roadmap issue #20 track the remaining open boxes:
+2.x PM-tab / buddy-add evidence, and a seihai-servertools suite-stress
+re-run. Main-branch additions after the published `v0.1.1` tag are not
+implied to be in that tag (release notes pointed at `fa062f4`).
