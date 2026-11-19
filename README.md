@@ -229,6 +229,7 @@ the "macOS builds" workflow by hand for a release tag (Actions → macOS builds 
 Run workflow). It tests and starts the server on each kind of Mac, and attaches
 the archives to the release only when its "upload" box is ticked. The builds
 are not signed.
+When a release happens, what the version numbers mean and what 1.0.0 needs: [VERSIONING.md](VERSIONING.md).
 
 ## Licence
 
