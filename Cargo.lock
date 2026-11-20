@@ -632,8 +632,8 @@ dependencies = [
 
 [[package]]
 name = "seihai-core"
-version = "0.7.1"
-source = "git+https://github.com/squirelworks/seihai-core?tag=v0.7.1#8aabc8e005bf0dfbe42032a223457f191d8c710e"
+version = "0.7.2"
+source = "git+https://github.com/squirelworks/seihai-core?tag=v0.7.2#81ba7e24df32ff5f937d0c09e7d5f75da6aa6913"
 dependencies = [
  "base64",
  "bzip2",
