@@ -28,14 +28,41 @@ The plan is in [docs/PLAN.md](docs/PLAN.md), the code layout in
 [docs/NEXT.md](docs/NEXT.md). Contributors should read [AGENTS.md](AGENTS.md)
 for the project rules.
 
+## Getting started
+
+Download the archive for your system from the
+[Releases page](https://github.com/squirelworks/seihai-listserver/releases) and
+unpack it, or build from source (see [Build](#build) below). The program needs
+nothing else installed. On macOS the first start may need right-click, Open,
+because the builds are not signed.
+
+The first time, write a config file and start the listserver:
+
+```
+seihai-listserver sample-config > seihai-listserver.toml
+seihai-listserver
+```
+
+It now listens on `127.0.0.1` only, with every account allowed in (open mode).
+Edit the file to change that; [Accounts](#accounts) and
+[Hosting for other machines](#hosting-for-other-machines) below cover the usual
+changes.
+
 ## Run
 
 ```
-seihai-listserver sample-config > seihai-listserver.toml   # optional, edit to taste
-seihai-listserver                                           # reads ./seihai-listserver.toml if present
+seihai-listserver                                  # reads ./seihai-listserver.toml if present
 seihai-listserver --config path/to/listserver.toml
-seihai-listserver key-fingerprint seihai-login.key
 ```
+
+| Command | What it does |
+| --- | --- |
+| `seihai-listserver` | Runs the listserver with `./seihai-listserver.toml`, or with every setting at its default when that file does not exist |
+| `seihai-listserver --config FILE` | Runs it with the settings in `FILE` |
+| `seihai-listserver add-account FILE ACCOUNT [--password-env VAR]` | Adds `ACCOUNT` to the accounts file `FILE` (made if missing), or sets a new password. The password comes from the environment variable `VAR`, or else is read as one line from standard input. Only an argon2id hash is stored |
+| `seihai-listserver sample-config` | Prints a config file with every setting at its default, each with a comment |
+| `seihai-listserver key-fingerprint [FILE]` | Prints the secure-login public key and fingerprint in `FILE` (default `seihai-login.key`) |
+| `seihai-listserver --help`, `--version` | Prints the usage or the version |
 
 `key-fingerprint` prints the secure-login public key and its fingerprint and
 exits. It does not start the listserver and does not create a missing key.
@@ -53,6 +80,31 @@ login shape). The site and upgrade URLs are empty unless you set them.
 Point a gserver's listserver setting at `127.0.0.1`, port 14900. Point a client
 at one of the client ports, for example
 `seihai --online 127.0.0.1:14922 --list-only --account test1 --password-env GRAAL_PW --version 2.22`.
+
+### Settings
+
+Every setting lives in the TOML config file, and every key is optional. The full
+list, with each default and what it does, is
+[`seihai-listserver.sample.toml`](seihai-listserver.sample.toml) (the same text
+`sample-config` prints). In short:
+
+| Setting | Default | What it sets |
+| --- | --- | --- |
+| `bind` | `"127.0.0.1"` | Address to listen on; `"0.0.0.0"` for every interface |
+| `gserver_port`, `client_ports` | `14900`, `[14921, 14922, 14923]` | Where gservers register and where clients ask for the list |
+| `gservers` | empty | Which gservers may register, each with its HQ password |
+| `list_name`, `status`, `site_url`, `upgrade_url` | lab values, empty URLs | What clients are shown after a login |
+| `accounts` | empty (open mode) | The accounts file made by `add-account` |
+| `log_file` | empty | Also write the log to this file |
+| `gserver_ip` | `"peer"` | Address shown for each gserver: where its link comes from, or what it sends (`"sent"`) |
+| `max_connections`, `client_timeout_secs`, `client_handshake_timeout_secs`, `gserver_timeout_secs`, `gserver_ping_secs` | 256, 30, 5, 300, 60 | Connection limits and timeouts |
+| `silent_list_after_ms` | 0 (off) | Send the list first to clients that wait, such as real 1.41 rev 1 |
+| `login_fail_limit`, `login_fail_window_secs` | 30, 60 | Cap on failed logins from one address |
+| `status_log_secs` | 300 | How often the log counts servers and players |
+| `secure_login_key`, `require_secure_login`, `require_secure_gserver_link` | `"seihai-login.key"`, false, false | The Seihai secure login (below) |
+| `machines`, `pcid_match_hashes`, `pcid_ignore_hashes` | `"seihai-machines.tsv"`, 2, empty | PC ids ([docs/pcid.md](docs/pcid.md)) |
+| `profiles`, `buddies`, `data` | empty (in memory) | Where player profiles and buddy lists are kept |
+| `[guilds]` | empty | Global guilds and their members |
 
 ## Hosting for other machines
 
@@ -220,11 +272,16 @@ seihai-mae --online 127.0.0.1:14922 --list-only --version 2.31 --secure-login \
 
 ## Build
 
+Install Rust from [rustup.rs](https://rustup.rs/) the first time, then:
+
 ```
+git clone https://github.com/squirelworks/seihai-listserver.git
+cd seihai-listserver
 cargo build --release
 cargo test
 ```
 
+The program is then at `target/release/seihai-listserver`.
 `cargo test` starts the listserver on free loopback ports and runs the lab
 shape tests (`tests/shapes.rs`), the silent-list, login-cap and reload tests
 (`tests/rest.rs`), Seihai's list client for 2.05, 2.17, 2.22, 2.31 and 3.04
