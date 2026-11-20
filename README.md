@@ -2,22 +2,31 @@
 
 A Graal listserver: gives classic clients (1.41 to 3.x), Seihai and RCs their server list, and lets gservers register and verify accounts.
 
-Part of the Seihai server stack:
-[seihai-gserver](https://github.com/squirelworks/seihai-gserver) ·
-[seihai-npcserver](https://github.com/squirelworks/seihai-npcserver) ·
-[seihai-listserver](https://github.com/squirelworks/seihai-listserver) ·
-[seihai-rc](https://github.com/squirelworks/seihai-rc) ·
-[seihai-servertools](https://github.com/squirelworks/seihai-servertools) ·
-[seihai-gserver-v2](https://github.com/squirelworks/seihai-gserver-v2) (GPL fork of GServer-v2, ships first) ·
-client: [seihai](https://github.com/squirelworks/seihai).
+Part of the Seihai project: the client [seihai](https://github.com/squirelworks/seihai)
+and its library [seihai-core](https://github.com/squirelworks/seihai-core); the Rust
+server stack [seihai-gserver](https://github.com/squirelworks/seihai-gserver),
+[seihai-listserver](https://github.com/squirelworks/seihai-listserver),
+[seihai-npcserver](https://github.com/squirelworks/seihai-npcserver),
+[seihai-rc](https://github.com/squirelworks/seihai-rc) and
+[seihai-servertools](https://github.com/squirelworks/seihai-servertools); the GPL forks
+[seihai-gserver-v2](https://github.com/squirelworks/seihai-gserver-v2) and
+[seihai-gs2lib](https://github.com/squirelworks/seihai-gs2lib); and the research notes in
+[Graal_analysis](https://github.com/squirelworks/Graal_analysis).
 
-**Status: v0.1.0 released (2026-11-04).** A Rust port of the lab listserver v2
-(`docs/reference/listserver.py`), checked on loopback with its shape tests and
-with Seihai's own list client, and in a lab run with the GPL fork and real
-clients under Wine (`docs/lab/2026-11-04-fork-loopback.md`). The plan is in [docs/PLAN.md](docs/PLAN.md), the
-rules every contributor and coding agent follows are in [AGENTS.md](AGENTS.md),
-the code layout is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the ordered
-to-do list is in [docs/NEXT.md](docs/NEXT.md).
+## Status
+
+The latest release is
+[v0.1.1](https://github.com/squirelworks/seihai-listserver/releases/tag/v0.1.1).
+seihai-listserver began as a Rust port of the lab listserver
+(`docs/reference/listserver.py`). It is tested on loopback with shape tests and
+Seihai's own list client, and in lab runs with the GServer-v2 fork and real
+clients under Wine (`docs/lab/`). `main` has more than the last release,
+including the text features between gservers described below.
+
+The plan is in [docs/PLAN.md](docs/PLAN.md), the code layout in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the to-do list in
+[docs/NEXT.md](docs/NEXT.md). Contributors should read [AGENTS.md](AGENTS.md)
+for the project rules.
 
 ## Run
 
