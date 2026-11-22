@@ -1,5 +1,7 @@
 Notes for the next seihai-listserver release. One line per user-visible change, added by the PR that makes it; the release PR moves them into `vX.Y.Z.md` (VERSIONING.md).
 
+- Add real-file startup/import regressions for missing profile and buddy sources, existing empty files, read-error recovery and import-once preservation. Baseline execution is pending; missing-source handling is not corrected yet.
+
 - Add real-file SQLite acceptance tests for supported-layout reopen, persistent import-once records, and preserving populated data when a newer schema is refused.
 
 - Refuse new machine-ID allocation when the table's supported ID range is exhausted, before writing an unreadable row or changing live state. Existing IDs can still match and gain keys.

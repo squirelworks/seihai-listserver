@@ -353,4 +353,96 @@ mod tests {
             assert_eq!(reopened.list(b"me"), expected(remove));
         }
     }
+
+    #[test]
+    fn a_missing_buddy_import_is_deferred_until_the_file_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite");
+        let file = dir.path().join("buddies.tsv");
+        let kept = vec![b"kept".to_vec()];
+        let imported_buddies = vec![b"carol".to_vec(), b"dave".to_vec()];
+        assert!(Buddies::open(&file).unwrap().is_empty());
+        assert!(!file.exists());
+        {
+            let store = Arc::new(Store::open(&db).unwrap());
+            store.put_buddies(b"alice", &kept).unwrap();
+            let (buddies, imported) = Buddies::with_store(Arc::clone(&store), &file).unwrap();
+            assert_eq!(imported, None);
+            assert!(!store.imported(Source::Buddies).unwrap());
+            assert_eq!(buddies.len(), 1);
+            assert_eq!(buddies.list(b"ALICE"), kept);
+            assert!(buddies.list(b"bob").is_empty());
+        }
+        std::fs::write(&file, b"Alice\tignored\nBob\tcarol\tdave\n").unwrap();
+        {
+            let store = Arc::new(Store::open(&db).unwrap());
+            let (buddies, imported) = Buddies::with_store(Arc::clone(&store), &file).unwrap();
+            assert_eq!(imported, Some(1));
+            assert!(store.imported(Source::Buddies).unwrap());
+            assert_eq!(buddies.len(), 2);
+            assert_eq!(buddies.list(b"alice"), kept);
+            assert_eq!(buddies.list(b"BOB"), imported_buddies);
+        }
+        std::fs::write(
+            &file,
+            b"Alice\toverwritten\nBob\toverwritten\nCarol\tdifferent\n",
+        )
+        .unwrap();
+        {
+            let store = Arc::new(Store::open(&db).unwrap());
+            let (buddies, imported) = Buddies::with_store(Arc::clone(&store), &file).unwrap();
+            assert_eq!(imported, None);
+            assert!(store.imported(Source::Buddies).unwrap());
+            assert_eq!(buddies.len(), 2);
+            assert_eq!(buddies.list(b"alice"), kept);
+            assert_eq!(buddies.list(b"bob"), imported_buddies);
+            assert!(buddies.list(b"carol").is_empty());
+        }
+    }
+
+    #[test]
+    fn empty_buddy_imports_complete_but_read_errors_do_not() {
+        for directory in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let db = dir.path().join("data.sqlite");
+            let file = dir.path().join("buddies.tsv");
+            if directory {
+                std::fs::create_dir(&file).unwrap();
+            } else {
+                std::fs::write(&file, b"").unwrap();
+            }
+            {
+                let store = Arc::new(Store::open(&db).unwrap());
+                if directory {
+                    assert!(Buddies::with_store(Arc::clone(&store), &file).is_err());
+                    assert!(!store.imported(Source::Buddies).unwrap());
+                } else {
+                    let (buddies, imported) =
+                        Buddies::with_store(Arc::clone(&store), &file).unwrap();
+                    assert_eq!(imported, Some(0));
+                    assert!(buddies.is_empty());
+                    assert!(store.imported(Source::Buddies).unwrap());
+                }
+            }
+            if directory {
+                std::fs::remove_dir(&file).unwrap();
+            }
+            std::fs::write(&file, b"Bob\tcarol\tdave\n").unwrap();
+            {
+                let store = Arc::new(Store::open(&db).unwrap());
+                let (buddies, imported) = Buddies::with_store(Arc::clone(&store), &file).unwrap();
+                assert!(store.imported(Source::Buddies).unwrap());
+                if directory {
+                    assert_eq!(imported, Some(1));
+                    assert_eq!(
+                        buddies.list(b"bob"),
+                        vec![b"carol".to_vec(), b"dave".to_vec()]
+                    );
+                } else {
+                    assert_eq!(imported, None);
+                    assert!(buddies.is_empty());
+                }
+            }
+        }
+    }
 }
