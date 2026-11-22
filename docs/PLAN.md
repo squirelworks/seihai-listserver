@@ -100,3 +100,17 @@ handshake timeout (#61).
 2.x PM-tab / buddy-add evidence, and a seihai-servertools suite-stress
 re-run. Main-branch additions after the published `v0.1.1` tag are not
 implied to be in that tag (release notes pointed at `fa062f4`).
+
+## Persistence follow-through (2026-11-22)
+
+Current `main` at `548f07b` pins seihai-core `v0.7.2`. [#73](https://github.com/squirelworks/seihai-listserver/pull/73)
+keeps new machine IDs within the same range the table loader can reopen,
+while preserving existing-ID matching and extension. [#74](https://github.com/squirelworks/seihai-listserver/pull/74) adds real-file
+SQLite profile/buddy/import-record reopen and populated future-schema
+refusal tests; production Store behavior is unchanged by that PR.
+
+Both merged slices passed Linux/Windows CI. SQLite accounts/guilds,
+historical migrations, byte-identical refusal, new real-client labs and
+macOS builds are not established by these tests. The active release and
+1.0 checklists are [#63](https://github.com/squirelworks/seihai-listserver/issues/63) and [#64](https://github.com/squirelworks/seihai-listserver/issues/64);
+`docs/NEXT.md` records the remaining gates.
