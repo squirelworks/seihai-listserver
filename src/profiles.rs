@@ -39,8 +39,8 @@ fn key(account: &[u8]) -> Vec<u8> {
     account.to_ascii_lowercase()
 }
 
-/// Read a profiles text file. A missing file is empty.
-fn read_file(path: &Path) -> Result<BTreeMap<Vec<u8>, Profile>, String> {
+/// Read a profiles text file; `None` when the file is missing.
+fn read_file(path: &Path) -> Result<Option<BTreeMap<Vec<u8>, Profile>>, String> {
     let mut map = BTreeMap::new();
     match std::fs::read(path) {
         Ok(data) => {
@@ -56,10 +56,10 @@ fn read_file(path: &Path) -> Result<BTreeMap<Vec<u8>, Profile>, String> {
                 map.insert(key(&account), p);
             }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(format!("{}: {e}", path.display())),
     }
-    Ok(map)
+    Ok(Some(map))
 }
 
 impl Profiles {
@@ -79,18 +79,21 @@ impl Profiles {
         }
         Ok(Self {
             backing: Backing::File(path.to_path_buf()),
-            map: Mutex::new(read_file(path)?),
+            map: Mutex::new(read_file(path)?.unwrap_or_default()),
         })
     }
 
     /// Keep profiles in the `data` store. When `file` (the `profiles`
-    /// setting) is not empty and was never imported into this store, its
+    /// setting) names an existing file not yet imported into this store, its
     /// rows are copied in first. Returns the store and how many accounts
     /// were imported.
     pub fn with_store(store: Arc<Store>, file: &Path) -> Result<(Self, Option<usize>), String> {
         let mut imported = None;
         if !file.as_os_str().is_empty() && !store.imported(Source::Profiles)? {
-            imported = store.import_profiles(file, &read_file(file)?)?;
+            imported = match read_file(file)? {
+                Some(rows) => store.import_profiles(file, &rows)?,
+                None => None,
+            };
         }
         let map = store.profiles()?;
         Ok((
@@ -218,5 +221,89 @@ mod tests {
         let s = Profiles::memory();
         s.set(b"bob", profile(&[b'x'; 300], b"")).unwrap();
         assert_eq!(s.get(b"BOB").unwrap()[0].len(), GCHAR_MAX);
+    }
+
+    #[test]
+    fn a_missing_profile_import_is_deferred_until_the_file_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite");
+        let file = dir.path().join("profiles.tsv");
+        let kept = profile(b"kept", b"retained quote");
+        assert!(Profiles::open(&file).unwrap().is_empty());
+        assert!(!file.exists());
+        {
+            let store = Arc::new(Store::open(&db).unwrap());
+            store.put_profile(b"alice", &kept).unwrap();
+            let (profiles, imported) = Profiles::with_store(Arc::clone(&store), &file).unwrap();
+            assert_eq!(imported, None);
+            assert!(!store.imported(Source::Profiles).unwrap());
+            assert_eq!(profiles.len(), 1);
+            assert_eq!(profiles.get(b"ALICE"), Some(kept.clone()));
+            assert_eq!(profiles.get(b"bob"), None);
+        }
+        std::fs::write(&file, b"Alice\tignored\nBob\tBob\n").unwrap();
+        {
+            let store = Arc::new(Store::open(&db).unwrap());
+            let (profiles, imported) = Profiles::with_store(Arc::clone(&store), &file).unwrap();
+            assert_eq!(imported, Some(1));
+            assert!(store.imported(Source::Profiles).unwrap());
+            assert_eq!(profiles.len(), 2);
+            assert_eq!(profiles.get(b"alice"), Some(kept.clone()));
+            assert_eq!(profiles.get(b"BOB"), Some(profile(b"Bob", b"")));
+        }
+        std::fs::write(&file, b"Alice\toverwritten\nBob\toverwritten\nCarol\tnew\n").unwrap();
+        {
+            let store = Arc::new(Store::open(&db).unwrap());
+            let (profiles, imported) = Profiles::with_store(Arc::clone(&store), &file).unwrap();
+            assert_eq!(imported, None);
+            assert!(store.imported(Source::Profiles).unwrap());
+            assert_eq!(profiles.len(), 2);
+            assert_eq!(profiles.get(b"alice"), Some(kept));
+            assert_eq!(profiles.get(b"bob"), Some(profile(b"Bob", b"")));
+            assert_eq!(profiles.get(b"carol"), None);
+        }
+    }
+
+    #[test]
+    fn empty_profile_imports_complete_but_read_errors_do_not() {
+        for directory in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let db = dir.path().join("data.sqlite");
+            let file = dir.path().join("profiles.tsv");
+            if directory {
+                std::fs::create_dir(&file).unwrap();
+            } else {
+                std::fs::write(&file, b"").unwrap();
+            }
+            {
+                let store = Arc::new(Store::open(&db).unwrap());
+                if directory {
+                    assert!(Profiles::with_store(Arc::clone(&store), &file).is_err());
+                    assert!(!store.imported(Source::Profiles).unwrap());
+                } else {
+                    let (profiles, imported) =
+                        Profiles::with_store(Arc::clone(&store), &file).unwrap();
+                    assert_eq!(imported, Some(0));
+                    assert!(profiles.is_empty());
+                    assert!(store.imported(Source::Profiles).unwrap());
+                }
+            }
+            if directory {
+                std::fs::remove_dir(&file).unwrap();
+            }
+            std::fs::write(&file, b"Bob\tBob\n").unwrap();
+            {
+                let store = Arc::new(Store::open(&db).unwrap());
+                let (profiles, imported) = Profiles::with_store(Arc::clone(&store), &file).unwrap();
+                assert!(store.imported(Source::Profiles).unwrap());
+                if directory {
+                    assert_eq!(imported, Some(1));
+                    assert_eq!(profiles.get(b"bob"), Some(profile(b"Bob", b"")));
+                } else {
+                    assert_eq!(imported, None);
+                    assert!(profiles.is_empty());
+                }
+            }
+        }
     }
 }

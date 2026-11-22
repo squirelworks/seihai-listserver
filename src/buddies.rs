@@ -34,11 +34,13 @@ use std::sync::{Arc, Mutex};
 /// Most buddies kept for one account.
 pub const MAX_BUDDIES: usize = 100;
 
+type BuddyLists = BTreeMap<Vec<u8>, Vec<Vec<u8>>>;
+
 /// The buddy store: account (lower case) to its buddies, in the order they
 /// were added, as the player wrote them.
 pub struct Buddies {
     backing: Backing,
-    map: Mutex<BTreeMap<Vec<u8>, Vec<Vec<u8>>>>,
+    map: Mutex<BuddyLists>,
 }
 
 /// Where changes are written.
@@ -52,8 +54,8 @@ fn key(account: &[u8]) -> Vec<u8> {
     account.to_ascii_lowercase()
 }
 
-/// Read a buddies text file. A missing file is empty.
-fn read_file(path: &Path) -> Result<BTreeMap<Vec<u8>, Vec<Vec<u8>>>, String> {
+/// Read a buddies text file; `None` when the file is missing.
+fn read_file(path: &Path) -> Result<Option<BuddyLists>, String> {
     let mut map = BTreeMap::new();
     match std::fs::read(path) {
         Ok(data) => {
@@ -70,10 +72,10 @@ fn read_file(path: &Path) -> Result<BTreeMap<Vec<u8>, Vec<Vec<u8>>>, String> {
                 map.insert(key(account), list);
             }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(format!("{}: {e}", path.display())),
     }
-    Ok(map)
+    Ok(Some(map))
 }
 
 impl Buddies {
@@ -93,18 +95,21 @@ impl Buddies {
         }
         Ok(Self {
             backing: Backing::File(path.to_path_buf()),
-            map: Mutex::new(read_file(path)?),
+            map: Mutex::new(read_file(path)?.unwrap_or_default()),
         })
     }
 
     /// Keep buddy lists in the `data` store. When `file` (the `buddies`
-    /// setting) is not empty and was never imported into this store, its
+    /// setting) names an existing file not yet imported into this store, its
     /// lists are copied in first. Returns the store and how many accounts
     /// were imported.
     pub fn with_store(store: Arc<Store>, file: &Path) -> Result<(Self, Option<usize>), String> {
         let mut imported = None;
         if !file.as_os_str().is_empty() && !store.imported(Source::Buddies)? {
-            imported = store.import_buddies(file, &read_file(file)?)?;
+            imported = match read_file(file)? {
+                Some(rows) => store.import_buddies(file, &rows)?,
+                None => None,
+            };
         }
         let map = store.buddies()?;
         Ok((
@@ -351,6 +356,98 @@ mod tests {
             let (reopened, _) =
                 Buddies::with_store(Arc::new(Store::open(&path).unwrap()), Path::new("")).unwrap();
             assert_eq!(reopened.list(b"me"), expected(remove));
+        }
+    }
+
+    #[test]
+    fn a_missing_buddy_import_is_deferred_until_the_file_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite");
+        let file = dir.path().join("buddies.tsv");
+        let kept = vec![b"kept".to_vec()];
+        let imported_buddies = vec![b"carol".to_vec(), b"dave".to_vec()];
+        assert!(Buddies::open(&file).unwrap().is_empty());
+        assert!(!file.exists());
+        {
+            let store = Arc::new(Store::open(&db).unwrap());
+            store.put_buddies(b"alice", &kept).unwrap();
+            let (buddies, imported) = Buddies::with_store(Arc::clone(&store), &file).unwrap();
+            assert_eq!(imported, None);
+            assert!(!store.imported(Source::Buddies).unwrap());
+            assert_eq!(buddies.len(), 1);
+            assert_eq!(buddies.list(b"ALICE"), kept);
+            assert!(buddies.list(b"bob").is_empty());
+        }
+        std::fs::write(&file, b"Alice\tignored\nBob\tcarol\tdave\n").unwrap();
+        {
+            let store = Arc::new(Store::open(&db).unwrap());
+            let (buddies, imported) = Buddies::with_store(Arc::clone(&store), &file).unwrap();
+            assert_eq!(imported, Some(1));
+            assert!(store.imported(Source::Buddies).unwrap());
+            assert_eq!(buddies.len(), 2);
+            assert_eq!(buddies.list(b"alice"), kept);
+            assert_eq!(buddies.list(b"BOB"), imported_buddies);
+        }
+        std::fs::write(
+            &file,
+            b"Alice\toverwritten\nBob\toverwritten\nCarol\tdifferent\n",
+        )
+        .unwrap();
+        {
+            let store = Arc::new(Store::open(&db).unwrap());
+            let (buddies, imported) = Buddies::with_store(Arc::clone(&store), &file).unwrap();
+            assert_eq!(imported, None);
+            assert!(store.imported(Source::Buddies).unwrap());
+            assert_eq!(buddies.len(), 2);
+            assert_eq!(buddies.list(b"alice"), kept);
+            assert_eq!(buddies.list(b"bob"), imported_buddies);
+            assert!(buddies.list(b"carol").is_empty());
+        }
+    }
+
+    #[test]
+    fn empty_buddy_imports_complete_but_read_errors_do_not() {
+        for directory in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let db = dir.path().join("data.sqlite");
+            let file = dir.path().join("buddies.tsv");
+            if directory {
+                std::fs::create_dir(&file).unwrap();
+            } else {
+                std::fs::write(&file, b"").unwrap();
+            }
+            {
+                let store = Arc::new(Store::open(&db).unwrap());
+                if directory {
+                    assert!(Buddies::with_store(Arc::clone(&store), &file).is_err());
+                    assert!(!store.imported(Source::Buddies).unwrap());
+                } else {
+                    let (buddies, imported) =
+                        Buddies::with_store(Arc::clone(&store), &file).unwrap();
+                    assert_eq!(imported, Some(0));
+                    assert!(buddies.is_empty());
+                    assert!(store.imported(Source::Buddies).unwrap());
+                }
+            }
+            if directory {
+                std::fs::remove_dir(&file).unwrap();
+            }
+            std::fs::write(&file, b"Bob\tcarol\tdave\n").unwrap();
+            {
+                let store = Arc::new(Store::open(&db).unwrap());
+                let (buddies, imported) = Buddies::with_store(Arc::clone(&store), &file).unwrap();
+                assert!(store.imported(Source::Buddies).unwrap());
+                if directory {
+                    assert_eq!(imported, Some(1));
+                    assert_eq!(
+                        buddies.list(b"bob"),
+                        vec![b"carol".to_vec(), b"dave".to_vec()]
+                    );
+                } else {
+                    assert_eq!(imported, None);
+                    assert!(buddies.is_empty());
+                }
+            }
         }
     }
 }
