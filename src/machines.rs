@@ -250,6 +250,9 @@ impl Machines {
             .filter(|&(id, n)| n >= need && (!weak || t.sizes.get(&id) == Some(&n)))
             .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
             .map(|(id, _)| id);
+        if found.is_none() && t.next > i64::MAX as u64 {
+            return Err(format!("{}: machine ID range exhausted", self.path.display()));
+        }
         let id = found.unwrap_or(t.next);
         let new: Vec<&Key> = keys
             .iter()
