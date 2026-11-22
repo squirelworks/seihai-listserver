@@ -468,4 +468,60 @@ mod tests {
         assert!(m.assign(&keys(&win(OS, "", "", ""), &[]), 2).is_err());
         assert_eq!(m.counts(), (0, 0), "nothing kept that was not written");
     }
+
+    #[test]
+    fn supported_id_exhaustion_preserves_the_file_and_existing_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("machines.tsv");
+        let maximum = i64::MAX as u64;
+        let a = Key {
+            platform: "test".into(),
+            slot: 1,
+            digest: "a".repeat(32),
+        };
+        let b = Key {
+            platform: "test".into(),
+            slot: 1,
+            digest: "b".repeat(32),
+        };
+        let c = Key {
+            platform: "test".into(),
+            slot: 1,
+            digest: "c".repeat(32),
+        };
+        let extra = Key {
+            platform: "test".into(),
+            slot: 2,
+            digest: "d".repeat(32),
+        };
+        std::fs::write(&path, format!("{}\ttest\t1\t{}\n", maximum - 1, a.digest)).unwrap();
+        let machines = Machines::open(&path).unwrap();
+        assert_eq!(
+            machines.assign(std::slice::from_ref(&b), 1).unwrap(),
+            Some(maximum)
+        );
+        assert_eq!(machines.counts(), (2, 2));
+        let saved = std::fs::read(&path).unwrap();
+        for _ in 0..2 {
+            assert!(machines.assign(std::slice::from_ref(&c), 1).is_err());
+            assert_eq!(machines.counts(), (2, 2));
+            assert_eq!(std::fs::read(&path).unwrap(), saved);
+        }
+        // Exhaustion must not reject an existing ID or stop adding a key to it.
+        assert_eq!(
+            machines.assign(&[b.clone(), extra.clone()], 1).unwrap(),
+            Some(maximum)
+        );
+        assert_eq!(machines.counts(), (2, 3));
+        drop(machines);
+        let fresh = Machines::open(&path).unwrap();
+        assert_eq!(fresh.counts(), (2, 3));
+        assert_eq!(fresh.assign(&[b, extra], 1).unwrap(), Some(maximum));
+        let saved = std::fs::read(&path).unwrap();
+        assert!(fresh.assign(std::slice::from_ref(&c), 1).is_err());
+        assert_eq!(fresh.counts(), (2, 3));
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+        drop(fresh);
+        assert_eq!(Machines::open(&path).unwrap().counts(), (2, 3));
+    }
 }
