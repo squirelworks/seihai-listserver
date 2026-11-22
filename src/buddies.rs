@@ -450,4 +450,61 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn lf_and_crlf_buddy_records_preserve_order_removal_and_sqlite_data() {
+        for crlf in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join("buddies.tsv");
+            let db = dir.path().join("data.sqlite");
+            let original = vec![b"Bob".to_vec(), b"Carol".to_vec()];
+            {
+                let text = Buddies::open(&file).unwrap();
+                text.add(b"Alice", &original).unwrap();
+                text.add(b"Bob", &[b"Alice".to_vec()]).unwrap();
+            }
+            let canonical = std::fs::read(&file).unwrap();
+            let mut input = Vec::new();
+            for byte in canonical {
+                if crlf && byte == b'\n' {
+                    input.push(b'\r');
+                }
+                input.push(byte);
+            }
+            std::fs::write(&file, &input).unwrap();
+            {
+                let text = Buddies::open(&file).unwrap();
+                assert_eq!(text.list(b"ALICE"), original, "CRLF={crlf}");
+                assert_eq!(text.list(b"bob"), vec![b"Alice".to_vec()]);
+                assert_eq!(
+                    text.remove(b"alice", &[b"CAROL".to_vec()]).unwrap(),
+                    vec![b"Bob".to_vec()]
+                );
+            }
+            {
+                let text = Buddies::open(&file).unwrap();
+                assert_eq!(text.list(b"alice"), vec![b"Bob".to_vec()]);
+                assert_eq!(text.list(b"bob"), vec![b"Alice".to_vec()]);
+            }
+            // Import the same original record representation, not the rewritten LF file.
+            std::fs::write(&file, &input).unwrap();
+            {
+                let store = Arc::new(Store::open(&db).unwrap());
+                let (buddies, imported) = Buddies::with_store(Arc::clone(&store), &file).unwrap();
+                assert_eq!(imported, Some(2));
+                assert!(store.imported(Source::Buddies).unwrap());
+                assert_eq!(buddies.list(b"alice"), original);
+                assert_eq!(buddies.list(b"BOB"), vec![b"Alice".to_vec()]);
+            }
+            {
+                let store = Arc::new(Store::open(&db).unwrap());
+                let (buddies, imported) =
+                    Buddies::with_store(Arc::clone(&store), Path::new("")).unwrap();
+                assert_eq!(imported, None);
+                assert!(store.imported(Source::Buddies).unwrap());
+                assert_eq!(buddies.list(b"alice"), original);
+                assert_eq!(buddies.list(b"bob"), vec![b"Alice".to_vec()]);
+            }
+        }
+    }
 }
