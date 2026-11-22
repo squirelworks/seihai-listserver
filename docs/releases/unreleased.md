@@ -1,6 +1,6 @@
 Notes for the next seihai-listserver release. One line per user-visible change, added by the PR that makes it; the release PR moves them into `vX.Y.Z.md` (VERSIONING.md).
 
-- Add real-file startup/import regressions for missing profile and buddy sources, existing empty files, read-error recovery and import-once preservation. Baseline execution is pending; missing-source handling is not corrected yet.
+- Defer one-shot SQLite profile/buddy imports while their configured text sources are missing, so a later restart can import a newly created or restored source. Existing empty files still complete an empty import; read errors, existing-row precedence and import-once behavior are unchanged.
 
 - Add real-file SQLite acceptance tests for supported-layout reopen, persistent import-once records, and preserving populated data when a newer schema is refused.
 

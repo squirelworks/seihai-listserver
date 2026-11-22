@@ -52,8 +52,8 @@ fn key(account: &[u8]) -> Vec<u8> {
     account.to_ascii_lowercase()
 }
 
-/// Read a buddies text file. A missing file is empty.
-fn read_file(path: &Path) -> Result<BTreeMap<Vec<u8>, Vec<Vec<u8>>>, String> {
+/// Read a buddies text file; `None` when the file is missing.
+fn read_file(path: &Path) -> Result<Option<BTreeMap<Vec<u8>, Vec<Vec<u8>>>>, String> {
     let mut map = BTreeMap::new();
     match std::fs::read(path) {
         Ok(data) => {
@@ -70,10 +70,10 @@ fn read_file(path: &Path) -> Result<BTreeMap<Vec<u8>, Vec<Vec<u8>>>, String> {
                 map.insert(key(account), list);
             }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(format!("{}: {e}", path.display())),
     }
-    Ok(map)
+    Ok(Some(map))
 }
 
 impl Buddies {
@@ -93,18 +93,21 @@ impl Buddies {
         }
         Ok(Self {
             backing: Backing::File(path.to_path_buf()),
-            map: Mutex::new(read_file(path)?),
+            map: Mutex::new(read_file(path)?.unwrap_or_default()),
         })
     }
 
     /// Keep buddy lists in the `data` store. When `file` (the `buddies`
-    /// setting) is not empty and was never imported into this store, its
+    /// setting) names an existing file not yet imported into this store, its
     /// lists are copied in first. Returns the store and how many accounts
     /// were imported.
     pub fn with_store(store: Arc<Store>, file: &Path) -> Result<(Self, Option<usize>), String> {
         let mut imported = None;
         if !file.as_os_str().is_empty() && !store.imported(Source::Buddies)? {
-            imported = store.import_buddies(file, &read_file(file)?)?;
+            imported = match read_file(file)? {
+                Some(rows) => store.import_buddies(file, &rows)?,
+                None => None,
+            };
         }
         let map = store.buddies()?;
         Ok((
