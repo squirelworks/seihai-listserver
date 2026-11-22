@@ -1,7 +1,8 @@
-# Roadmap status (issue #20)
+# Roadmap status (issues #63 and #64)
 
-Working mirror of [issue #20](https://github.com/squirelworks/seihai-listserver/issues/20)
-against `main` at `c348f68` (after #59–#61). Tick boxes when the matching
+Working status for [0.2.0 issue #63](https://github.com/squirelworks/seihai-listserver/issues/63)
+and [1.0 issue #64](https://github.com/squirelworks/seihai-listserver/issues/64),
+reconciled 2026-11-22 against `main` at `548f07b`. Tick boxes when the matching
 PR merges. One branch and pull request per change (`AGENTS.md`).
 
 ## Where it stands
@@ -20,11 +21,26 @@ PR merges. One branch and pull request per change (`AGENTS.md`).
   `docs/design/gserver-text-profiles-guilds.md`. Native 4.20r8 buddy and
   PM-tab checks are in `#49`
   (`docs/lab/2026-11-14-buddies-pm-tab-4.20r8.md`).
-- **Core pin:** `seihai-core` tag `v0.4.0` (`#56`).
+- **Core pin:** `seihai-core` tag `v0.7.2`.
 - **Since the 2026-11-14 PLAN refresh:** gserver ping `#54`; 1.39-and-earlier
   out-of-scope note `#57`; shape-S provenance `#58`; densest-row list
   truncate `#59`; join-count caps `#60`; incomplete first-frame handshake
   timeout `#61`.
+
+## Recent merged persistence acceptance
+
+- [x] New machine IDs stop at the table loader's supported maximum before
+      append/live mutation; existing maximum-ID matching and key extension
+      remain supported. Last-valid/refusal/reload tests pass ([#73](https://github.com/squirelworks/seihai-listserver/pull/73)).
+- [x] Real-file SQLite tests preserve profile arrays, buddy ordering and
+      exact import records across reopen, and logical version/data through
+      repeated populated newer-schema refusal ([#74](https://github.com/squirelworks/seihai-listserver/pull/74)). This was tests-only.
+
+Both PRs passed Linux/Windows CI. The Store has schema version 1 and
+holds profiles/buddies/import records, not accounts or guilds. The
+unversioned fixture uses the current layout: no historical migration or
+byte-identical/journal-free refusal is established. Config/schema docs,
+migration policy, missing labs, stress and macOS/release gates stay open.
 
 ## Open checkboxes
 
@@ -54,7 +70,7 @@ PR merges. One branch and pull request per change (`AGENTS.md`).
 - [x] Secure client login, encrypted gserver link, secure RC list
       (`docs/lab/2026-11-12-secure-rc-list.md`).
 - [x] Gserver text A–H + SQLite store (`#47`, `#48`) and 4.20r8 lab (`#49`).
-- [x] Gserver ping `#54`; core `v0.4.0` `#56`; docs `#57`/`#58`; list and
+- [x] Gserver ping `#54`; historical core `v0.4.0` `#56`; docs `#57`/`#58`; list and
       link hardening `#59`–`#61`.
 
 ## Not in scope
