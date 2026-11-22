@@ -55,11 +55,19 @@ fn key(account: &[u8]) -> Vec<u8> {
 }
 
 /// Read a buddies text file; `None` when the file is missing.
+/// LF or CRLF delimit records; an unterminated final record is kept as sent.
 fn read_file(path: &Path) -> Result<Option<BuddyLists>, String> {
     let mut map = BTreeMap::new();
     match std::fs::read(path) {
         Ok(data) => {
-            for line in data.split(|&b| b == b'\n').filter(|l| !l.is_empty()) {
+            for record in data.split_inclusive(|&b| b == b'\n') {
+                let line = match record.strip_suffix(b"\n") {
+                    Some(line) => line.strip_suffix(b"\r").unwrap_or(line),
+                    None => record,
+                };
+                if line.is_empty() {
+                    continue;
+                }
                 let mut parts = line.split(|&b| b == b'\t');
                 let Some(account) = parts.next() else {
                     continue;
@@ -447,6 +455,63 @@ mod tests {
                     assert_eq!(imported, None);
                     assert!(buddies.is_empty());
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn lf_and_crlf_buddy_records_preserve_order_removal_and_sqlite_data() {
+        for crlf in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join("buddies.tsv");
+            let db = dir.path().join("data.sqlite");
+            let original = vec![b"Bob".to_vec(), b"Carol".to_vec()];
+            {
+                let text = Buddies::open(&file).unwrap();
+                text.add(b"Alice", &original).unwrap();
+                text.add(b"Bob", &[b"Alice".to_vec()]).unwrap();
+            }
+            let canonical = std::fs::read(&file).unwrap();
+            let mut input = Vec::new();
+            for byte in canonical {
+                if crlf && byte == b'\n' {
+                    input.push(b'\r');
+                }
+                input.push(byte);
+            }
+            std::fs::write(&file, &input).unwrap();
+            {
+                let text = Buddies::open(&file).unwrap();
+                assert_eq!(text.list(b"ALICE"), original, "CRLF={crlf}");
+                assert_eq!(text.list(b"bob"), vec![b"Alice".to_vec()]);
+                assert_eq!(
+                    text.remove(b"alice", &[b"CAROL".to_vec()]).unwrap(),
+                    vec![b"Bob".to_vec()]
+                );
+            }
+            {
+                let text = Buddies::open(&file).unwrap();
+                assert_eq!(text.list(b"alice"), vec![b"Bob".to_vec()]);
+                assert_eq!(text.list(b"bob"), vec![b"Alice".to_vec()]);
+            }
+            // Import the same original record representation, not the rewritten LF file.
+            std::fs::write(&file, &input).unwrap();
+            {
+                let store = Arc::new(Store::open(&db).unwrap());
+                let (buddies, imported) = Buddies::with_store(Arc::clone(&store), &file).unwrap();
+                assert_eq!(imported, Some(2));
+                assert!(store.imported(Source::Buddies).unwrap());
+                assert_eq!(buddies.list(b"alice"), original);
+                assert_eq!(buddies.list(b"BOB"), vec![b"Alice".to_vec()]);
+            }
+            {
+                let store = Arc::new(Store::open(&db).unwrap());
+                let (buddies, imported) =
+                    Buddies::with_store(Arc::clone(&store), Path::new("")).unwrap();
+                assert_eq!(imported, None);
+                assert!(store.imported(Source::Buddies).unwrap());
+                assert_eq!(buddies.list(b"alice"), original);
+                assert_eq!(buddies.list(b"bob"), vec![b"Alice".to_vec()]);
             }
         }
     }

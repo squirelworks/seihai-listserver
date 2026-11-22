@@ -40,11 +40,19 @@ fn key(account: &[u8]) -> Vec<u8> {
 }
 
 /// Read a profiles text file; `None` when the file is missing.
+/// LF or CRLF delimit records; an unterminated final record is kept as sent.
 fn read_file(path: &Path) -> Result<Option<BTreeMap<Vec<u8>, Profile>>, String> {
     let mut map = BTreeMap::new();
     match std::fs::read(path) {
         Ok(data) => {
-            for line in data.split(|&b| b == b'\n').filter(|l| !l.is_empty()) {
+            for record in data.split_inclusive(|&b| b == b'\n') {
+                let line = match record.strip_suffix(b"\n") {
+                    Some(line) => line.strip_suffix(b"\r").unwrap_or(line),
+                    None => record,
+                };
+                if line.is_empty() {
+                    continue;
+                }
                 let mut parts = line.split(|&b| b == b'\t').map(unescape);
                 let Some(account) = parts.next() else {
                     continue;
@@ -303,6 +311,77 @@ mod tests {
                     assert_eq!(imported, None);
                     assert!(profiles.is_empty());
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn an_unterminated_profile_record_keeps_its_final_cr_and_spaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("profiles.tsv");
+        let mut expected: Profile = Default::default();
+        expected[0] = b"name ".to_vec();
+        expected[8] = b" \r".to_vec();
+        // Preserve the existing reader's bytes outside a consumed LF delimiter.
+        let mut raw = b"Alice".to_vec();
+        for field in &expected {
+            raw.push(b'\t');
+            raw.extend_from_slice(field);
+        }
+        std::fs::write(&file, raw).unwrap();
+        assert_eq!(Profiles::open(&file).unwrap().get(b"alice"), Some(expected));
+    }
+
+    #[test]
+    fn lf_and_crlf_profile_records_preserve_fields_in_text_and_sqlite() {
+        for crlf in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join("profiles.tsv");
+            let db = dir.path().join("data.sqlite");
+            let mut alice: Profile = std::array::from_fn(|i| format!("field{i}").into_bytes());
+            alice[0] = b"Al\\ice".to_vec();
+            alice[2] = vec![0xff, b'x'];
+            alice[3] = b"one\ttwo".to_vec();
+            alice[8] = b"literal\r".to_vec();
+            let mut bob: Profile = Default::default();
+            bob[0] = b"Bob".to_vec();
+            {
+                let text = Profiles::open(&file).unwrap();
+                text.set(b"Alice", alice.clone()).unwrap();
+                text.set(b"Bob", bob.clone()).unwrap();
+            }
+            let canonical = std::fs::read(&file).unwrap();
+            assert!(canonical.windows(2).any(|b| b == b"\\r"));
+            let mut input = Vec::new();
+            for byte in canonical {
+                if crlf && byte == b'\n' {
+                    input.push(b'\r');
+                }
+                input.push(byte);
+            }
+            std::fs::write(&file, &input).unwrap();
+            {
+                let text = Profiles::open(&file).unwrap();
+                assert_eq!(text.len(), 2);
+                assert_eq!(text.get(b"ALICE"), Some(alice.clone()), "CRLF={crlf}");
+                assert_eq!(text.get(b"bob"), Some(bob.clone()), "CRLF={crlf}");
+            }
+            {
+                let store = Arc::new(Store::open(&db).unwrap());
+                let (profiles, imported) = Profiles::with_store(Arc::clone(&store), &file).unwrap();
+                assert_eq!(imported, Some(2));
+                assert!(store.imported(Source::Profiles).unwrap());
+                assert_eq!(profiles.get(b"alice"), Some(alice.clone()));
+                assert_eq!(profiles.get(b"BOB"), Some(bob.clone()));
+            }
+            {
+                let store = Arc::new(Store::open(&db).unwrap());
+                let (profiles, imported) =
+                    Profiles::with_store(Arc::clone(&store), Path::new("")).unwrap();
+                assert_eq!(imported, None);
+                assert!(store.imported(Source::Profiles).unwrap());
+                assert_eq!(profiles.get(b"alice"), Some(alice));
+                assert_eq!(profiles.get(b"bob"), Some(bob));
             }
         }
     }

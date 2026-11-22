@@ -199,6 +199,11 @@ channel chat (`irc`), player counts pushed to the other gservers, and
 buddy lists (`verifybuddies`, `addbuddy`, `deletebuddy`, `REQUESTBUDDIES`,
 saved to `buddies`). With the `data` setting, profiles and buddy lists are
 kept in one SQLite file instead, and the old text files are imported once.
+
+Profile and buddy text records accept LF or CRLF endings, including
+one-shot imports into SQLite. Profile-field escapes and other field bytes
+are preserved. Only a CR immediately before LF is part of the record delimiter.
+
 When a `VERIACC2` that gets in carries a 4.x to 6.03 client's machine
 digests, `SVI_ASSIGNPCID` (30) with the machine's PC id goes out just
 before the `SUCCESS` answer; see [`docs/pcid.md`](docs/pcid.md). A
