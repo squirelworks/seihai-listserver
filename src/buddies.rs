@@ -34,11 +34,13 @@ use std::sync::{Arc, Mutex};
 /// Most buddies kept for one account.
 pub const MAX_BUDDIES: usize = 100;
 
+type BuddyLists = BTreeMap<Vec<u8>, Vec<Vec<u8>>>;
+
 /// The buddy store: account (lower case) to its buddies, in the order they
 /// were added, as the player wrote them.
 pub struct Buddies {
     backing: Backing,
-    map: Mutex<BTreeMap<Vec<u8>, Vec<Vec<u8>>>>,
+    map: Mutex<BuddyLists>,
 }
 
 /// Where changes are written.
@@ -53,7 +55,7 @@ fn key(account: &[u8]) -> Vec<u8> {
 }
 
 /// Read a buddies text file; `None` when the file is missing.
-fn read_file(path: &Path) -> Result<Option<BTreeMap<Vec<u8>, Vec<Vec<u8>>>>, String> {
+fn read_file(path: &Path) -> Result<Option<BuddyLists>, String> {
     let mut map = BTreeMap::new();
     match std::fs::read(path) {
         Ok(data) => {
