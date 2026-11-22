@@ -382,4 +382,172 @@ mod tests {
         };
         assert!(e.contains("newer listserver"), "{e}");
     }
+
+    fn populate_file(path: &Path) {
+        let store = Store::open(path).unwrap();
+        store.put_profile(b"alice", &profile(b"kept")).unwrap();
+        let profiles = BTreeMap::from([
+            (b"alice".to_vec(), profile(b"ignored")),
+            (b"bob".to_vec(), profile(b"imported")),
+        ]);
+        assert_eq!(
+            store
+                .import_profiles(Path::new("p.tsv"), &profiles)
+                .unwrap(),
+            Some(1)
+        );
+        store
+            .put_buddies(b"alice", &[b"bob".to_vec(), b"carol".to_vec()])
+            .unwrap();
+        let buddies = BTreeMap::from([
+            (b"alice".to_vec(), vec![b"ignored".to_vec()]),
+            (b"bob".to_vec(), vec![b"alice".to_vec()]),
+        ]);
+        assert_eq!(
+            store.import_buddies(Path::new("b.tsv"), &buddies).unwrap(),
+            Some(1)
+        );
+    }
+
+    fn expected_profiles() -> BTreeMap<Vec<u8>, Profile> {
+        BTreeMap::from([
+            (b"alice".to_vec(), profile(b"kept")),
+            (b"bob".to_vec(), profile(b"imported")),
+        ])
+    }
+
+    fn expected_buddies() -> BTreeMap<Vec<u8>, Vec<Vec<u8>>> {
+        BTreeMap::from([
+            (b"alice".to_vec(), vec![b"bob".to_vec(), b"carol".to_vec()]),
+            (b"bob".to_vec(), vec![b"alice".to_vec()]),
+        ])
+    }
+
+    fn import_rows(conn: &Connection) -> Vec<(String, String, i64, i64)> {
+        conn.prepare("SELECT source, file, rows, at FROM imports ORDER BY source")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn supported_file_reopen_preserves_rows_and_import_once_records() {
+        // The same accepted table layout with either an unset or current version.
+        // This is not a claim about an unimplemented historical migration.
+        for version in [0, SCHEMA] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("data.sqlite");
+            populate_file(&path);
+            let before = {
+                let conn = Connection::open(&path).unwrap();
+                conn.pragma_update(None, "user_version", version).unwrap();
+                import_rows(&conn)
+            };
+            assert_eq!(before.len(), 2);
+            for _ in 0..2 {
+                let store = Store::open(&path).unwrap();
+                assert_eq!(store.profiles().unwrap(), expected_profiles());
+                assert_eq!(store.buddies().unwrap(), expected_buddies());
+                for source in [Source::Profiles, Source::Buddies] {
+                    assert!(store.imported(source).unwrap());
+                }
+                let changed = BTreeMap::from([(b"new".to_vec(), profile(b"not imported"))]);
+                assert_eq!(
+                    store
+                        .import_profiles(Path::new("changed.tsv"), &changed)
+                        .unwrap(),
+                    None
+                );
+                let changed = BTreeMap::from([(b"new".to_vec(), vec![b"other".to_vec()])]);
+                assert_eq!(
+                    store
+                        .import_buddies(Path::new("changed.tsv"), &changed)
+                        .unwrap(),
+                    None
+                );
+                assert_eq!(store.profiles().unwrap(), expected_profiles());
+                assert_eq!(store.buddies().unwrap(), expected_buddies());
+                drop(store);
+                let conn = Connection::open(&path).unwrap();
+                let actual: i64 = conn
+                    .pragma_query_value(None, "user_version", |r| r.get(0))
+                    .unwrap();
+                assert_eq!(actual, SCHEMA);
+                assert_eq!(import_rows(&conn), before);
+            }
+        }
+    }
+
+    #[test]
+    fn populated_newer_schema_refusal_preserves_version_and_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("data.sqlite");
+        populate_file(&path);
+        let before = {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE future_data (value BLOB NOT NULL)")
+                .unwrap();
+            conn.execute(
+                "INSERT INTO future_data VALUES (?1)",
+                [b"\0\xfffuture".as_slice()],
+            )
+            .unwrap();
+            conn.pragma_update(None, "user_version", SCHEMA + 1)
+                .unwrap();
+            import_rows(&conn)
+        };
+        for _ in 0..2 {
+            let Err(error) = Store::open(&path) else {
+                panic!("newer schema was opened");
+            };
+            assert!(error.contains("newer listserver"), "{error}");
+            let conn = Connection::open(&path).unwrap();
+            let actual: i64 = conn
+                .pragma_query_value(None, "user_version", |r| r.get(0))
+                .unwrap();
+            assert_eq!(actual, SCHEMA + 1);
+            assert_eq!(import_rows(&conn), before);
+            let count: i64 = conn
+                .query_row("SELECT count(*) FROM profiles", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, 2);
+            for (account, expected) in expected_profiles() {
+                let actual = conn.query_row(
+                    "SELECT name, age, sex, country, messenger, email, url, hangout, quote FROM profiles WHERE account = ?1",
+                    [account],
+                    |row| {
+                        let mut fields: Profile = Default::default();
+                        for (i, field) in fields.iter_mut().enumerate() { *field = row.get(i)?; }
+                        Ok(fields)
+                    },
+                ).unwrap();
+                assert_eq!(actual, expected);
+            }
+            let rows: Vec<(Vec<u8>, i64, Vec<u8>)> = conn
+                .prepare("SELECT account, pos, buddy FROM buddies ORDER BY account, pos")
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(
+                rows,
+                vec![
+                    (b"alice".to_vec(), 0, b"bob".to_vec()),
+                    (b"alice".to_vec(), 1, b"carol".to_vec()),
+                    (b"bob".to_vec(), 0, b"alice".to_vec()),
+                ]
+            );
+            let rows: Vec<Vec<u8>> = conn
+                .prepare("SELECT value FROM future_data")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(rows, vec![b"\0\xfffuture".to_vec()]);
+        }
+    }
 }
