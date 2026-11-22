@@ -40,11 +40,19 @@ fn key(account: &[u8]) -> Vec<u8> {
 }
 
 /// Read a profiles text file; `None` when the file is missing.
+/// LF or CRLF delimit records; an unterminated final record is kept as sent.
 fn read_file(path: &Path) -> Result<Option<BTreeMap<Vec<u8>, Profile>>, String> {
     let mut map = BTreeMap::new();
     match std::fs::read(path) {
         Ok(data) => {
-            for line in data.split(|&b| b == b'\n').filter(|l| !l.is_empty()) {
+            for record in data.split_inclusive(|&b| b == b'\n') {
+                let line = match record.strip_suffix(b"\n") {
+                    Some(line) => line.strip_suffix(b"\r").unwrap_or(line),
+                    None => record,
+                };
+                if line.is_empty() {
+                    continue;
+                }
                 let mut parts = line.split(|&b| b == b'\t').map(unescape);
                 let Some(account) = parts.next() else {
                     continue;

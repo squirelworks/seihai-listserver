@@ -1,6 +1,6 @@
 Notes for the next seihai-listserver release. One line per user-visible change, added by the PR that makes it; the release PR moves them into `vX.Y.Z.md` (VERSIONING.md).
 
-- Add acceptance regressions for LF/CRLF profile and buddy text records, exact field-byte preservation and text-to-SQLite reopen. Baseline execution is pending; this project portability feature is not implemented yet.
+- Accept LF and CRLF records in profile/buddy text files and one-shot SQLite imports, preserving all field bytes, profile escapes and buddy order. Only a CR immediately before LF is consumed as a delimiter; final unterminated-record bytes retain their existing meaning.
 
 - Defer one-shot SQLite profile/buddy imports while their configured text sources are missing, so a later restart can import a newly created or restored source. Existing empty files still complete an empty import; read errors, existing-row precedence and import-once behavior are unchanged.
 
