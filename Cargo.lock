@@ -632,8 +632,8 @@ dependencies = [
 
 [[package]]
 name = "seihai-core"
-version = "0.7.2"
-source = "git+https://github.com/squirelworks/seihai-core?tag=v0.7.2#81ba7e24df32ff5f937d0c09e7d5f75da6aa6913"
+version = "0.8.0"
+source = "git+https://github.com/squirelworks/seihai-core?tag=v0.8.0#910416b9af0d8dd00d3151b1ef7dd371c1a4daac"
 dependencies = [
  "base64",
  "bzip2",
@@ -651,7 +651,7 @@ dependencies = [
 
 [[package]]
 name = "seihai-listserver"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "argon2",
  "rusqlite",
