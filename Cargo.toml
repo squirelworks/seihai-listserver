@@ -1,6 +1,6 @@
 [package]
 name = "seihai-listserver"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "A Graal listserver: gives classic clients (1.41 to 3.x), Seihai and RCs their server list, and lets gservers register and verify accounts."
@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 # Protocol, framing, version profiles and scripting shared with the Seihai client.
-seihai-core = { git = "https://github.com/squirelworks/seihai-core", tag = "v0.7.2", default-features = false }
+seihai-core = { git = "https://github.com/squirelworks/seihai-core", tag = "v0.8.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 argon2 = { version = "0.5", features = ["std"] }
